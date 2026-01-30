@@ -1,9 +1,8 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
   Text,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,34 +10,28 @@ import {
   Image,
   Alert,
   Dimensions,
-  ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeInUp,
-  SlideInRight,
-  Layout,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   withSequence,
-  withSpring,
   withRepeat,
-  interpolate,
-  Extrapolate,
   Easing,
-  runOnJS,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
-import { AnimatedButton, AnimatedInput } from '../../components';
+import { AnimatedButton } from '../../components';
 import { useAuth } from '../../context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -53,9 +46,6 @@ const COUPLE_IMAGES = [
 
 type AuthStackParamList = {
   Login: undefined;
-  Signup: undefined;
-  OtpVerification: { phoneNumber: string };
-  ProfileSetup: undefined;
 };
 
 type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
@@ -138,18 +128,10 @@ const AnimatedBackground: React.FC = () => {
 
 export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { login, isLoading } = useAuth();
+  const { googleLogin, isLoading } = useAuth();
+  const { request, promptAsync } = useGoogleAuth();
 
-  const [loginMethod, setLoginMethod] = useState<'phone' | 'email'>('phone');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<{ phone?: string; email?: string; password?: string }>({});
-
-  const passwordRef = useRef<TextInput>(null);
   const logoScale = useSharedValue(1);
-  const logoRotate = useSharedValue(0);
 
   useEffect(() => {
     // Subtle logo pulse animation
@@ -167,63 +149,45 @@ export const LoginScreen: React.FC = () => {
     transform: [{ scale: logoScale.value }],
   }));
 
-  const validatePhone = useCallback(() => {
-    if (phoneNumber.length < 10) {
-      setErrors(prev => ({ ...prev, phone: 'Please enter a valid phone number' }));
-      return false;
-    }
-    setErrors(prev => ({ ...prev, phone: undefined }));
-    return true;
-  }, [phoneNumber]);
-
-  const validateEmail = useCallback(() => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setErrors(prev => ({ ...prev, email: 'Please enter a valid email address' }));
-      return false;
-    }
-    if (password.length < 6) {
-      setErrors(prev => ({ ...prev, password: 'Password must be at least 6 characters' }));
-      return false;
-    }
-    setErrors(prev => ({ ...prev, email: undefined, password: undefined }));
-    return true;
-  }, [email, password]);
-
-  const handlePhoneLogin = useCallback(async () => {
-    if (!validatePhone()) return;
+  const handleGoogleLogin = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const success = await login('phone', phoneNumber);
-    if (success) {
-      navigation.navigate('OtpVerification', { phoneNumber });
-    }
-  }, [phoneNumber, login, navigation, validatePhone]);
 
-  const handleEmailLogin = useCallback(async () => {
-    if (!validateEmail()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const success = await login('email', email, password);
-    if (success) {
-      navigation.navigate('ProfileSetup');
-    }
-  }, [email, password, login, navigation, validateEmail]);
+    try {
+      const result = await promptAsync();
 
-  const handleLogin = useCallback(() => {
-    if (loginMethod === 'phone') {
-      handlePhoneLogin();
-    } else {
-      handleEmailLogin();
-    }
-  }, [loginMethod, handlePhoneLogin, handleEmailLogin]);
+      if (result?.type === 'success') {
+        const { authentication } = result;
+        if (!authentication) {
+          throw new Error('No authentication data received');
+        }
+        const success = await googleLogin(authentication.accessToken);
 
-  const handleSocialLogin = useCallback((provider: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
-      `${provider} Sign In`,
-      `${provider} authentication will be available soon!`,
-      [{ text: 'OK' }]
-    );
-  }, []);
+        if (!success) {
+          Alert.alert(
+            'Login Failed',
+            'Unable to sign in with Google. Please try again.',
+            [{ text: 'OK' }]
+          );
+        }
+        // Navigation is handled automatically by RootNavigator
+        // when isAuthenticated becomes true
+      } else if (result?.type === 'error') {
+        Alert.alert(
+          'Error',
+          'An error occurred during sign in. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+      // If cancelled, just return to login screen (no error needed)
+    } catch (error) {
+      console.error('[LoginScreen] Google login error:', error);
+      Alert.alert(
+        'Error',
+        'An unexpected error occurred. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  }, [promptAsync, googleLogin]);
 
   return (
     <View style={styles.container}>
@@ -262,174 +226,35 @@ export const LoginScreen: React.FC = () => {
               <Text style={styles.subTagline}>Find love that runs deep</Text>
             </Animated.View>
 
-            {/* Glass Card for Login Form */}
+            {/* Glass Card for Login */}
             <Animated.View entering={FadeInUp.delay(500).springify()} style={styles.glassCard}>
-              {/* Login Method Toggle */}
-              <View style={styles.toggleContainer}>
-                <Pressable
-                  style={[
-                    styles.toggleButton,
-                    loginMethod === 'phone' && styles.toggleButtonActive,
-                  ]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setLoginMethod('phone');
-                  }}
-                >
-                  <Ionicons
-                    name="call"
-                    size={18}
-                    color={loginMethod === 'phone' ? colors.text : colors.textMuted}
-                  />
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      loginMethod === 'phone' && styles.toggleTextActive,
-                    ]}
-                  >
-                    Phone
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.toggleButton,
-                    loginMethod === 'email' && styles.toggleButtonActive,
-                  ]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setLoginMethod('email');
-                  }}
-                >
-                  <Ionicons
-                    name="mail"
-                    size={18}
-                    color={loginMethod === 'email' ? colors.text : colors.textMuted}
-                  />
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      loginMethod === 'email' && styles.toggleTextActive,
-                    ]}
-                  >
-                    Email
-                  </Text>
-                </Pressable>
+              {/* Welcome Message */}
+              <View style={styles.welcomeContainer}>
+                <Text style={styles.welcomeTitle}>Welcome to InBlood</Text>
+                <Text style={styles.welcomeSubtitle}>
+                  Sign in with Google to find your perfect match
+                </Text>
               </View>
 
-              {/* Form */}
-              <View style={styles.form}>
-                {loginMethod === 'phone' ? (
-                  <AnimatedInput
-                    label="Phone Number"
-                    placeholder="+91 98765 43210"
-                    keyboardType="phone-pad"
-                    value={phoneNumber}
-                    onChangeText={setPhoneNumber}
-                    error={errors.phone}
-                    icon={<Ionicons name="call-outline" size={20} color={colors.textMuted} />}
-                  />
-                ) : (
-                  <>
-                    <AnimatedInput
-                      label="Email Address"
-                      placeholder="your@email.com"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      value={email}
-                      onChangeText={setEmail}
-                      error={errors.email}
-                      returnKeyType="next"
-                      onSubmitEditing={() => passwordRef.current?.focus()}
-                      icon={<Ionicons name="mail-outline" size={20} color={colors.textMuted} />}
-                    />
-                    <AnimatedInput
-                      ref={passwordRef}
-                      label="Password"
-                      placeholder="Enter your password"
-                      secureTextEntry={!showPassword}
-                      value={password}
-                      onChangeText={setPassword}
-                      error={errors.password}
-                      returnKeyType="done"
-                      onSubmitEditing={handleLogin}
-                      icon={<Ionicons name="lock-closed-outline" size={20} color={colors.textMuted} />}
-                      rightIcon={
-                        <Pressable onPress={() => setShowPassword(!showPassword)}>
-                          <Ionicons
-                            name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                            size={20}
-                            color={colors.textMuted}
-                          />
-                        </Pressable>
-                      }
-                    />
-                    <Pressable style={styles.forgotPassword}>
-                      <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                    </Pressable>
-                  </>
-                )}
-              </View>
-
-              {/* CTA Button */}
+              {/* Google Sign In Button */}
               <AnimatedButton
-                title={loginMethod === 'phone' ? 'Continue' : 'Sign In'}
-                onPress={handleLogin}
-                loading={isLoading}
+                title="Continue with Google"
+                onPress={handleGoogleLogin}
+                loading={isLoading || !request}
+                disabled={!request}
                 fullWidth
                 size="large"
+                icon={<Ionicons name="logo-google" size={24} color={colors.text} />}
+                style={styles.googleButton}
               />
 
-              {/* Divider */}
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or</Text>
-                <View style={styles.dividerLine} />
+              {/* Info Text */}
+              <View style={styles.infoContainer}>
+                <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
+                <Text style={styles.infoText}>
+                  Your data is secure and will never be shared without your permission
+                </Text>
               </View>
-
-              {/* Social Login Buttons */}
-              <View style={styles.socialButtons}>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => handleSocialLogin('Google')}
-                >
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
-                    style={styles.socialButtonGradient}
-                  >
-                    <Ionicons name="logo-google" size={22} color={colors.text} />
-                  </LinearGradient>
-                </Pressable>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => handleSocialLogin('Apple')}
-                >
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
-                    style={styles.socialButtonGradient}
-                  >
-                    <Ionicons name="logo-apple" size={24} color={colors.text} />
-                  </LinearGradient>
-                </Pressable>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => handleSocialLogin('Facebook')}
-                >
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
-                    style={styles.socialButtonGradient}
-                  >
-                    <Ionicons name="logo-facebook" size={22} color={colors.text} />
-                  </LinearGradient>
-                </Pressable>
-              </View>
-            </Animated.View>
-
-            {/* Sign Up Link */}
-            <Animated.View entering={FadeIn.delay(700)} style={styles.signupContainer}>
-              <Text style={styles.signupText}>New to InBlood? </Text>
-              <Pressable onPress={() => navigation.navigate('Signup')}>
-                <Text style={styles.signupLink}>Create Account</Text>
-              </Pressable>
             </Animated.View>
 
             {/* Terms */}
@@ -550,94 +375,37 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
-  toggleContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: borderRadius.lg,
-    padding: 4,
-    marginBottom: spacing.lg,
-  },
-  toggleButton: {
-    flex: 1,
-    flexDirection: 'row',
+  welcomeContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderRadius: borderRadius.md,
-    gap: spacing.xs,
+    marginBottom: spacing.xl,
   },
-  toggleButtonActive: {
-    backgroundColor: colors.primary,
-  },
-  toggleText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textMuted,
-  },
-  toggleTextActive: {
+  welcomeTitle: {
+    fontSize: fontSize.xxl,
+    fontWeight: fontWeight.bold,
     color: colors.text,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
   },
-  form: {
-    marginBottom: spacing.md,
-  },
-  forgotPassword: {
-    alignSelf: 'flex-end',
-    marginTop: spacing.xs,
-  },
-  forgotPasswordText: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
-    fontWeight: fontWeight.medium,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: spacing.lg,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  dividerText: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-    marginHorizontal: spacing.md,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  socialButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.md,
-  },
-  socialButton: {
-    borderRadius: borderRadius.full,
-    overflow: 'hidden',
-  },
-  socialButtonGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  signupContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: spacing.xl,
-  },
-  signupText: {
+  welcomeSubtitle: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
   },
-  signupLink: {
-    fontSize: fontSize.md,
-    color: colors.primary,
-    fontWeight: fontWeight.bold,
+  googleButton: {
+    marginBottom: spacing.lg,
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    lineHeight: 18,
   },
   termsContainer: {
     marginTop: spacing.lg,

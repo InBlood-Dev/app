@@ -14,8 +14,6 @@ export type RootStackParamList = {
 
 export type AuthStackParamList = {
   Login: undefined;
-  Signup: undefined;
-  OtpVerification: { phoneNumber: string };
 };
 
 export type MainTabsParamList = {

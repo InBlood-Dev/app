@@ -49,98 +49,90 @@ const navigationTheme: Theme = {
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, hasCompletedOnboarding, hasCompletedProfileSetup } = useAuth();
 
-  const getInitialRoute = (): keyof RootStackParamList => {
-    // TEMPORARY: Skip onboarding/auth for development
-    return 'MainTabs';
-
-    // Original flow (commented out for development)
-    // if (!hasCompletedOnboarding) return 'Onboarding';
-    // if (!isAuthenticated) return 'Auth';
-    // if (!hasCompletedProfileSetup) return 'ProfileSetup';
-    // return 'MainTabs';
-  };
-
   return (
     <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator
-        initialRouteName={getInitialRoute()}
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        {/* Onboarding */}
-        <Stack.Screen
-          name="Onboarding"
-          component={OnboardingScreen}
-          options={{ animation: 'fade' }}
-        />
+        {!hasCompletedOnboarding ? (
+          /* Onboarding */
+          <Stack.Screen
+            name="Onboarding"
+            component={OnboardingScreen}
+            options={{ animation: 'fade' }}
+          />
+        ) : !isAuthenticated ? (
+          /* Auth Flow */
+          <Stack.Screen
+            name="Auth"
+            component={AuthNavigator}
+            options={{ animation: 'fade' }}
+          />
+        ) : !hasCompletedProfileSetup ? (
+          /* Profile Setup */
+          <Stack.Screen
+            name="ProfileSetup"
+            component={ProfileSetupScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+        ) : (
+          <>
+            {/* Main App */}
+            <Stack.Screen
+              name="MainTabs"
+              component={MainTabNavigator}
+              options={{ animation: 'fade' }}
+            />
 
-        {/* Auth Flow */}
-        <Stack.Screen
-          name="Auth"
-          component={AuthNavigator}
-          options={{ animation: 'fade' }}
-        />
+            {/* Modal Screens */}
+            <Stack.Screen
+              name="MatchScreen"
+              component={MatchScreen}
+              options={{
+                animation: 'fade',
+                presentation: 'fullScreenModal',
+              }}
+            />
 
-        {/* Profile Setup */}
-        <Stack.Screen
-          name="ProfileSetup"
-          component={ProfileSetupScreen}
-          options={{ animation: 'slide_from_right' }}
-        />
+            <Stack.Screen
+              name="ProfileDetail"
+              component={ProfileDetailScreen}
+              options={{
+                animation: 'slide_from_bottom',
+                presentation: 'modal',
+              }}
+            />
 
-        {/* Main App */}
-        <Stack.Screen
-          name="MainTabs"
-          component={MainTabNavigator}
-          options={{ animation: 'fade' }}
-        />
+            <Stack.Screen
+              name="ChatScreen"
+              component={ChatScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
 
-        {/* Modal Screens */}
-        <Stack.Screen
-          name="MatchScreen"
-          component={MatchScreen}
-          options={{
-            animation: 'fade',
-            presentation: 'fullScreenModal',
-          }}
-        />
+            <Stack.Screen
+              name="EditProfile"
+              component={EditProfileScreen}
+              options={{
+                animation: 'slide_from_bottom',
+                presentation: 'modal',
+              }}
+            />
 
-        <Stack.Screen
-          name="ProfileDetail"
-          component={ProfileDetailScreen}
-          options={{
-            animation: 'slide_from_bottom',
-            presentation: 'modal',
-          }}
-        />
-
-        <Stack.Screen
-          name="ChatScreen"
-          component={ChatScreen}
-          options={{
-            animation: 'slide_from_right',
-          }}
-        />
-
-        <Stack.Screen
-          name="EditProfile"
-          component={EditProfileScreen}
-          options={{
-            animation: 'slide_from_bottom',
-            presentation: 'modal',
-          }}
-        />
-
-        <Stack.Screen
-          name="Settings"
-          component={SettingsScreen}
-          options={{
-            animation: 'slide_from_right',
-          }}
-        />
+            <Stack.Screen
+              name="Settings"
+              component={SettingsScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

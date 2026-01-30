@@ -1,18 +1,19 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { GOOGLE_USERINFO_ENDPOINT } from '../config/oauth';
 
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   hasCompletedOnboarding: boolean;
   hasCompletedProfileSetup: boolean;
-  phoneNumber: string | null;
   email: string | null;
+  name: string | null;
+  profilePicture: string | null;
+  googleUserId: string | null;
 }
 
 interface AuthContextType extends AuthState {
-  login: (method: 'phone' | 'email', credential: string, password?: string) => Promise<boolean>;
-  verifyOtp: (otp: string) => Promise<boolean>;
-  signup: (email: string, password: string) => Promise<boolean>;
+  googleLogin: (accessToken: string) => Promise<boolean>;
   logout: () => void;
   completeOnboarding: () => void;
   completeProfileSetup: () => void;
@@ -23,8 +24,10 @@ const initialState: AuthState = {
   isLoading: false,
   hasCompletedOnboarding: false,
   hasCompletedProfileSetup: false,
-  phoneNumber: null,
   email: null,
+  name: null,
+  profilePicture: null,
+  googleUserId: null,
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,78 +35,55 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
 
-  const login = useCallback(async (method: 'phone' | 'email', credential: string, password?: string): Promise<boolean> => {
+  const googleLogin = useCallback(async (accessToken: string): Promise<boolean> => {
     setState(prev => ({ ...prev, isLoading: true }));
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      // Fetch user info from Google
+      const response = await fetch(GOOGLE_USERINFO_ENDPOINT, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
-    if (method === 'phone') {
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        phoneNumber: credential,
-      }));
-      return true; // Returns true to indicate OTP was "sent"
-    }
+      if (!response.ok) {
+        throw new Error('Failed to fetch user info from Google');
+      }
 
-    // Email login - mock validation
-    if (method === 'email' && password && password.length >= 6) {
+      const userInfo = await response.json();
+
+      console.log('[AuthContext] Google user info:', userInfo);
+
+      // TODO: Send to your backend API to create/login user
+      // const backendResponse = await fetch('YOUR_API/auth/google', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({
+      //     accessToken,
+      //     email: userInfo.email,
+      //     name: userInfo.name,
+      //     picture: userInfo.picture,
+      //     googleUserId: userInfo.id,
+      //   }),
+      // });
+      // const backendData = await backendResponse.json();
+
+      // For now, mock authentication success
       setState(prev => ({
         ...prev,
         isAuthenticated: true,
         isLoading: false,
-        email: credential,
+        email: userInfo.email,
+        name: userInfo.name,
+        profilePicture: userInfo.picture,
+        googleUserId: userInfo.id,
         hasCompletedOnboarding: true,
       }));
+
       return true;
+    } catch (error) {
+      console.error('[AuthContext] Google login error:', error);
+      setState(prev => ({ ...prev, isLoading: false }));
+      return false;
     }
-
-    setState(prev => ({ ...prev, isLoading: false }));
-    return false;
-  }, []);
-
-  const verifyOtp = useCallback(async (otp: string): Promise<boolean> => {
-    setState(prev => ({ ...prev, isLoading: true }));
-
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Mock OTP - always succeeds with any 6 digit code
-    if (otp.length === 6) {
-      setState(prev => ({
-        ...prev,
-        isAuthenticated: true,
-        isLoading: false,
-        hasCompletedOnboarding: true,
-      }));
-      return true;
-    }
-
-    setState(prev => ({ ...prev, isLoading: false }));
-    return false;
-  }, []);
-
-  const signup = useCallback(async (email: string, password: string): Promise<boolean> => {
-    setState(prev => ({ ...prev, isLoading: true }));
-
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // Mock validation
-    if (email.includes('@') && password.length >= 6) {
-      setState(prev => ({
-        ...prev,
-        isAuthenticated: true,
-        isLoading: false,
-        email,
-        hasCompletedOnboarding: true,
-      }));
-      return true;
-    }
-
-    setState(prev => ({ ...prev, isLoading: false }));
-    return false;
   }, []);
 
   const logout = useCallback(() => {
@@ -122,9 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <AuthContext.Provider
       value={{
         ...state,
-        login,
-        verifyOtp,
-        signup,
+        googleLogin,
         logout,
         completeOnboarding,
         completeProfileSetup,

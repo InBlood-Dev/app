@@ -10,9 +10,6 @@ import {
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
-  withSequence,
-  interpolate,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -45,22 +42,18 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
   textStyle,
   fullWidth = false,
 }) => {
-  const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
     opacity: opacity.value,
   }));
 
   const handlePressIn = useCallback(() => {
-    scale.value = withSpring(0.95, { damping: 10, stiffness: 400 });
-    opacity.value = withSpring(0.9);
+    opacity.value = 0.7;
   }, []);
 
   const handlePressOut = useCallback(() => {
-    scale.value = withSpring(1, { damping: 10, stiffness: 400 });
-    opacity.value = withSpring(1);
+    opacity.value = 1;
   }, []);
 
   const handlePress = useCallback(() => {

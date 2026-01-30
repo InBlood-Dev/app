@@ -19,8 +19,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Circle } from 'react-native-svg';
 import { AnimatedButton } from '../../components';
 import { useAuth } from '../../context';
@@ -64,13 +62,6 @@ const PROFILE_IMAGES = [
   'https://images.unsplash.com/photo-1583195764036-6dc248ac07d9?w=200&h=200&fit=crop', // Indian man
   'https://images.unsplash.com/photo-1611432579699-484f7990b127?w=200&h=200&fit=crop', // Indian woman
 ];
-
-type RootStackParamList = {
-  Onboarding: undefined;
-  Auth: undefined;
-};
-
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 // First slide - Location/Nearby with circular profiles
 const LocationSlide: React.FC = () => {
@@ -227,7 +218,7 @@ const HeartsSlide: React.FC = () => {
     { size: 35, top: 200, right: 60, rotation: -10 },
     { size: 20, top: 280, left: 50, rotation: 15 },
     { size: 30, top: 320, right: 30, rotation: -20 },
-    { size: 15, top: 100, left: '45%', rotation: 5 },
+    { size: 15, top: 100, left: SCREEN_WIDTH * 0.45, rotation: 5 },
     { size: 25, top: 350, left: 80, rotation: -8 },
     { size: 18, top: 380, right: 90, rotation: 12 },
   ];
@@ -385,7 +376,6 @@ const Pagination: React.FC<{
 };
 
 export const OnboardingScreen: React.FC = () => {
-  const navigation = useNavigation<NavigationProp>();
   const { completeOnboarding } = useAuth();
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useSharedValue(0);
@@ -410,9 +400,10 @@ export const OnboardingScreen: React.FC = () => {
       });
     } else {
       completeOnboarding();
-      navigation.navigate('Auth');
+      // No manual navigation needed - RootNavigator will automatically show Auth screen
+      // when completeOnboarding() sets hasCompletedOnboarding = true
     }
-  }, [currentIndex, navigation, completeOnboarding]);
+  }, [currentIndex, completeOnboarding]);
 
   return (
     <View style={styles.container}>
