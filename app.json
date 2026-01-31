@@ -31,7 +31,13 @@
     "scheme": "inblood",
     "plugins": [
       "expo-image-picker",
-      "expo-font"
+      "expo-font",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.345043990448-d7t4lhjte5tqfh7249ovia2b6pbn0k90"
+        }
+      ]
     ]
   }
 }

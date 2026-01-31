@@ -129,7 +129,7 @@ const AnimatedBackground: React.FC = () => {
 export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const { googleLogin, isLoading } = useAuth();
-  const { request, promptAsync } = useGoogleAuth();
+  const { signIn, isConfigured, isSigningIn } = useGoogleAuth();
 
   const logoScale = useSharedValue(1);
 
@@ -153,14 +153,11 @@ export const LoginScreen: React.FC = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const result = await promptAsync();
+      const result = await signIn();
 
-      if (result?.type === 'success') {
-        const { authentication } = result;
-        if (!authentication) {
-          throw new Error('No authentication data received');
-        }
-        const success = await googleLogin(authentication.accessToken);
+      if (result) {
+        // Pass user info directly to auth context
+        const success = await googleLogin(result.user);
 
         if (!success) {
           Alert.alert(
@@ -171,14 +168,8 @@ export const LoginScreen: React.FC = () => {
         }
         // Navigation is handled automatically by RootNavigator
         // when isAuthenticated becomes true
-      } else if (result?.type === 'error') {
-        Alert.alert(
-          'Error',
-          'An error occurred during sign in. Please try again.',
-          [{ text: 'OK' }]
-        );
       }
-      // If cancelled, just return to login screen (no error needed)
+      // If cancelled (result is null), just return to login screen (no error needed)
     } catch (error) {
       console.error('[LoginScreen] Google login error:', error);
       Alert.alert(
@@ -187,7 +178,7 @@ export const LoginScreen: React.FC = () => {
         [{ text: 'OK' }]
       );
     }
-  }, [promptAsync, googleLogin]);
+  }, [signIn, googleLogin]);
 
   return (
     <View style={styles.container}>
@@ -240,8 +231,8 @@ export const LoginScreen: React.FC = () => {
               <AnimatedButton
                 title="Continue with Google"
                 onPress={handleGoogleLogin}
-                loading={isLoading || !request}
-                disabled={!request}
+                loading={isLoading || isSigningIn}
+                disabled={!isConfigured || isSigningIn}
                 fullWidth
                 size="large"
                 icon={<Ionicons name="logo-google" size={24} color={colors.text} />}

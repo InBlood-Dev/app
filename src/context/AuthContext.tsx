@@ -1,5 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { GOOGLE_USERINFO_ENDPOINT } from '../config/oauth';
+
+interface GoogleUserInfo {
+  id: string;
+  email: string | null;
+  name: string | null;
+  photo: string | null;
+}
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -13,7 +19,7 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  googleLogin: (accessToken: string) => Promise<boolean>;
+  googleLogin: (userInfo: GoogleUserInfo) => Promise<boolean>;
   logout: () => void;
   completeOnboarding: () => void;
   completeProfileSetup: () => void;
@@ -35,21 +41,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
 
-  const googleLogin = useCallback(async (accessToken: string): Promise<boolean> => {
+  const googleLogin = useCallback(async (userInfo: GoogleUserInfo): Promise<boolean> => {
     setState(prev => ({ ...prev, isLoading: true }));
 
     try {
-      // Fetch user info from Google
-      const response = await fetch(GOOGLE_USERINFO_ENDPOINT, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch user info from Google');
-      }
-
-      const userInfo = await response.json();
-
       console.log('[AuthContext] Google user info:', userInfo);
 
       // TODO: Send to your backend API to create/login user
@@ -57,10 +52,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       //   method: 'POST',
       //   headers: { 'Content-Type': 'application/json' },
       //   body: JSON.stringify({
-      //     accessToken,
       //     email: userInfo.email,
       //     name: userInfo.name,
-      //     picture: userInfo.picture,
+      //     picture: userInfo.photo,
       //     googleUserId: userInfo.id,
       //   }),
       // });
@@ -73,7 +67,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isLoading: false,
         email: userInfo.email,
         name: userInfo.name,
-        profilePicture: userInfo.picture,
+        profilePicture: userInfo.photo,
         googleUserId: userInfo.id,
         hasCompletedOnboarding: true,
       }));

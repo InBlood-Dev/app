@@ -1,145 +1,153 @@
 /**
- * Google OAuth Authentication Hook
+ * Google Sign-In Hook
  *
- * This custom hook handles Google OAuth authentication using expo-auth-session.
- * It manages the OAuth flow, platform-specific configuration, and returns
- * the authentication request and prompt function.
+ * This custom hook handles Google authentication using the native Google Sign-In SDK.
+ * It provides a native sign-in experience without browser redirects.
  *
  * Usage:
  * ```typescript
- * const { request, promptAsync, response } = useGoogleAuth();
+ * const { signIn, signOut, isConfigured } = useGoogleAuth();
  *
- * // Trigger OAuth flow
  * const handleLogin = async () => {
- *   const result = await promptAsync();
- *   if (result?.type === 'success') {
- *     const { authentication } = result;
- *     // Use authentication.accessToken to get user info
+ *   const userInfo = await signIn();
+ *   if (userInfo) {
+ *     // Use userInfo.user.email, userInfo.user.name, etc.
  *   }
  * };
  * ```
  */
 
-import { useEffect } from 'react';
-import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
-import { Platform } from 'react-native';
-import { GOOGLE_OAUTH_CONFIG } from '../config/oauth';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  GoogleSignin,
+  statusCodes,
+  isSuccessResponse,
+  isErrorWithCode,
+  type User,
+} from '@react-native-google-signin/google-signin';
 
-/**
- * IMPORTANT: This is required for expo-auth-session to work properly on web.
- * It allows the auth session to be completed when the browser returns to the app.
- */
-WebBrowser.maybeCompleteAuthSession();
-
-/**
- * Google OAuth Authentication Hook
- *
- * @returns {object} Authentication utilities
- * @returns {AuthRequest | null} request - The auth request object (null until ready)
- * @returns {function} promptAsync - Function to trigger the OAuth flow
- * @returns {AuthSessionResult | null} response - The OAuth response (null until completed)
- */
-export const useGoogleAuth = () => {
-  /**
-   * Determine which client ID to use based on the current platform
-   *
-   * @returns {string} The appropriate client ID for the current platform
-   */
-  const getClientId = (): string => {
-    if (Platform.OS === 'ios') {
-      return GOOGLE_OAUTH_CONFIG.iosClientId;
-    }
-    if (Platform.OS === 'android') {
-      return GOOGLE_OAUTH_CONFIG.androidClientId;
-    }
-    // Default to web client ID for web and other platforms
-    return GOOGLE_OAUTH_CONFIG.webClientId;
+interface GoogleAuthResult {
+  user: {
+    id: string;
+    email: string | null;
+    name: string | null;
+    photo: string | null;
   };
+  idToken: string | null;
+}
+
+interface UseGoogleAuthReturn {
+  signIn: () => Promise<GoogleAuthResult | null>;
+  signOut: () => Promise<void>;
+  isConfigured: boolean;
+  isSigningIn: boolean;
+}
+
+/**
+ * Google Sign-In Hook
+ *
+ * @returns {UseGoogleAuthReturn} Authentication utilities
+ */
+export const useGoogleAuth = (): UseGoogleAuthReturn => {
+  const [isConfigured, setIsConfigured] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   /**
-   * Configure and create the OAuth authentication request
-   *
-   * useAuthRequest returns:
-   * - request: The auth request object (null until configuration is complete)
-   * - response: The result of the authentication (null until user completes OAuth)
-   * - promptAsync: Function to trigger the OAuth flow (opens browser)
-   */
-  const [request, response, promptAsync] = AuthSession.useAuthRequest(
-    {
-      // Platform-specific client ID
-      clientId: getClientId(),
-
-      // OAuth scopes (permissions we're requesting)
-      scopes: GOOGLE_OAUTH_CONFIG.scopes,
-
-      /**
-       * Redirect URI - where Google will send the user after authentication
-       *
-       * makeRedirectUri generates the correct URI based on:
-       * - Development: Expo's proxy URL (for Expo Go)
-       * - Production: Your app's custom scheme (standalone builds)
-       */
-      redirectUri: AuthSession.makeRedirectUri({
-        scheme: 'inblood',
-        path: 'redirect',
-      }),
-    },
-    // Google OAuth discovery document
-    GOOGLE_OAUTH_CONFIG.discovery
-  );
-
-  /**
-   * Log the redirect URI for debugging purposes
-   * This helps verify the correct redirect URI is being used
+   * Configure Google Sign-In on mount
    */
   useEffect(() => {
-    const redirectUri = AuthSession.makeRedirectUri({
-      scheme: 'inblood',
-      path: 'redirect',
-    });
-    console.log('[useGoogleAuth] Redirect URI:', redirectUri);
-    console.log('[useGoogleAuth] Platform:', Platform.OS);
-    console.log('[useGoogleAuth] Client ID:', getClientId());
+    const configure = async () => {
+      try {
+        await GoogleSignin.configure({
+          scopes: ['profile', 'email'],
+        });
+        setIsConfigured(true);
+        console.log('[useGoogleAuth] Google Sign-In configured successfully');
+      } catch (error) {
+        console.error('[useGoogleAuth] Configuration error:', error);
+      }
+    };
+
+    configure();
   }, []);
 
   /**
-   * Handle OAuth response
-   * This effect runs whenever the OAuth flow completes
+   * Sign in with Google
+   * Opens native Google Sign-In modal
+   *
+   * @returns {Promise<GoogleAuthResult | null>} User info or null if cancelled/failed
    */
-  useEffect(() => {
-    if (response) {
-      console.log('[useGoogleAuth] OAuth response:', response.type);
-
-      if (response.type === 'success') {
-        console.log('[useGoogleAuth] Authentication successful');
-        // Note: The actual handling of the access token is done in the component
-        // that uses this hook, not here
-      } else if (response.type === 'error') {
-        console.error('[useGoogleAuth] Authentication error:', response.error);
-      } else if (response.type === 'cancel') {
-        console.log('[useGoogleAuth] User cancelled authentication');
-      }
+  const signIn = useCallback(async (): Promise<GoogleAuthResult | null> => {
+    if (!isConfigured) {
+      console.warn('[useGoogleAuth] Google Sign-In not configured yet');
+      return null;
     }
-  }, [response]);
+
+    setIsSigningIn(true);
+
+    try {
+      // Check if user has Google Play Services
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Sign in
+      const response = await GoogleSignin.signIn();
+
+      if (isSuccessResponse(response)) {
+        console.log('[useGoogleAuth] Sign-in successful');
+
+        return {
+          user: {
+            id: response.data.user.id,
+            email: response.data.user.email,
+            name: response.data.user.name,
+            photo: response.data.user.photo,
+          },
+          idToken: response.data.idToken,
+        };
+      } else {
+        console.log('[useGoogleAuth] Sign-in cancelled by user');
+        return null;
+      }
+    } catch (error) {
+      if (isErrorWithCode(error)) {
+        switch (error.code) {
+          case statusCodes.SIGN_IN_CANCELLED:
+            console.log('[useGoogleAuth] User cancelled sign-in');
+            break;
+          case statusCodes.IN_PROGRESS:
+            console.log('[useGoogleAuth] Sign-in already in progress');
+            break;
+          case statusCodes.PLAY_SERVICES_NOT_AVAILABLE:
+            console.error('[useGoogleAuth] Play Services not available');
+            break;
+          default:
+            console.error('[useGoogleAuth] Error:', error.code, error.message);
+        }
+      } else {
+        console.error('[useGoogleAuth] Unknown error:', error);
+      }
+      return null;
+    } finally {
+      setIsSigningIn(false);
+    }
+  }, [isConfigured]);
+
+  /**
+   * Sign out from Google
+   */
+  const signOut = useCallback(async (): Promise<void> => {
+    try {
+      await GoogleSignin.signOut();
+      console.log('[useGoogleAuth] Signed out successfully');
+    } catch (error) {
+      console.error('[useGoogleAuth] Sign-out error:', error);
+    }
+  }, []);
 
   return {
-    /**
-     * The authentication request object
-     * Null until the request is fully configured
-     */
-    request,
-
-    /**
-     * Function to trigger the OAuth flow
-     * Opens the browser for user authentication
-     */
-    promptAsync,
-
-    /**
-     * The OAuth response
-     * Null until the user completes or cancels the authentication
-     */
-    response,
+    signIn,
+    signOut,
+    isConfigured,
+    isSigningIn,
   };
 };
