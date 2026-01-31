@@ -7,7 +7,11 @@ import {
   Pressable,
   Image,
   Dimensions,
+  Alert,
 } from 'react-native';
+
+// TODO: Move to environment config
+const API_BASE_URL = 'http://192.168.29.105:5000/api/v1';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
@@ -74,7 +78,8 @@ const CITIES = [
 export const ProfileSetupScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const { updateUser } = useUser();
-  const { completeProfileSetup } = useAuth();
+  const { completeProfileSetup, email, googleUserId, accessToken } = useAuth();
+  const [isSaving, setIsSaving] = useState(false);
 
   const [currentStep, setCurrentStep] = useState<Step>('basics');
   const [direction, setDirection] = useState<'forward' | 'backward'>('forward');
@@ -117,32 +122,192 @@ export const ProfileSetupScreen: React.FC = () => {
     }
   }, [currentStep, name, age, gender, interestedIn, photos, bio, interests, city]);
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setDirection('forward');
 
+    console.log('[ProfileSetupScreen] handleNext called');
+    console.log('[ProfileSetupScreen] Current step:', currentStep);
+    console.log('[ProfileSetupScreen] Current step index:', currentStepIndex);
+    console.log('[ProfileSetupScreen] Total steps:', STEPS.length);
+
     if (currentStepIndex < STEPS.length - 1) {
-      setCurrentStep(STEPS[currentStepIndex + 1]);
+      const nextStep = STEPS[currentStepIndex + 1];
+      console.log('[ProfileSetupScreen] Moving to next step:', nextStep);
+      setCurrentStep(nextStep);
     } else {
-      // Complete profile setup
-      updateUser({
+      // Complete profile setup - save to backend
+      console.log('[ProfileSetupScreen] Final step - saving profile to backend');
+
+      // Backend expects flat field names, not nested objects
+      const profileData = {
         name,
         age: parseInt(age),
-        gender: gender as any,
-        interestedIn: interestedIn as any,
-        photos,
+        gender,
         bio,
+        interested_in: interestedIn,
         interests,
-        location: { city },
-        preferences: { ageRange, maxDistance },
-      });
-      completeProfileSetup();
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'MainTabs' }],
-      });
+        location_city: city,
+        age_min: ageRange.min,
+        age_max: ageRange.max,
+        proximity_range: maxDistance,
+      };
+
+      console.log('[ProfileSetupScreen] Profile data to save:');
+      console.log('[ProfileSetupScreen]   - name:', profileData.name);
+      console.log('[ProfileSetupScreen]   - age:', profileData.age);
+      console.log('[ProfileSetupScreen]   - gender:', profileData.gender);
+      console.log('[ProfileSetupScreen]   - bio:', profileData.bio);
+      console.log('[ProfileSetupScreen]   - interested_in:', profileData.interested_in);
+      console.log('[ProfileSetupScreen]   - interests:', profileData.interests);
+      console.log('[ProfileSetupScreen]   - location_city:', profileData.location_city);
+      console.log('[ProfileSetupScreen]   - age_min:', profileData.age_min);
+      console.log('[ProfileSetupScreen]   - age_max:', profileData.age_max);
+      console.log('[ProfileSetupScreen]   - proximity_range:', profileData.proximity_range);
+      console.log('[ProfileSetupScreen]   - photos to upload:', photos.length);
+      console.log('[ProfileSetupScreen] Access Token:', accessToken ? `present (length: ${accessToken.length})` : 'MISSING');
+
+      if (!accessToken) {
+        console.error('[ProfileSetupScreen] No access token available - cannot save profile');
+        Alert.alert(
+          'Error',
+          'Authentication error. Please log out and log in again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      setIsSaving(true);
+
+      try {
+        // Step 1: Upload photos first
+        console.log('='.repeat(60));
+        console.log('[ProfileSetupScreen] Step 1: Uploading photos');
+        console.log('='.repeat(60));
+
+        const uploadedPhotoUrls: string[] = [];
+        for (let i = 0; i < photos.length; i++) {
+          const photoUri = photos[i];
+          console.log(`[ProfileSetupScreen] Uploading photo ${i + 1}/${photos.length}: ${photoUri}`);
+
+          const formData = new FormData();
+          // Backend expects field name 'file' for single upload
+          formData.append('file', {
+            uri: photoUri,
+            type: 'image/jpeg',
+            name: `photo_${i}.jpg`,
+          } as any);
+
+          // Use the correct upload endpoint: /upload/single
+          const uploadUrl = `${API_BASE_URL}/upload/single`;
+          console.log(`[ProfileSetupScreen] Upload URL: ${uploadUrl}`);
+
+          const uploadResponse = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              // Note: Don't set Content-Type for FormData - let fetch set it with boundary
+            },
+            body: formData,
+          });
+
+          console.log(`[ProfileSetupScreen] Photo ${i + 1} upload status:`, uploadResponse.status);
+
+          if (uploadResponse.ok) {
+            const uploadResult = await uploadResponse.json();
+            console.log(`[ProfileSetupScreen] Photo ${i + 1} upload result:`, JSON.stringify(uploadResult, null, 2));
+            // Check for URL in response - adjust based on actual backend response structure
+            const photoUrl = uploadResult.data?.url || uploadResult.data?.secure_url || uploadResult.url;
+            if (photoUrl) {
+              uploadedPhotoUrls.push(photoUrl);
+              console.log(`[ProfileSetupScreen] Photo ${i + 1} URL saved:`, photoUrl);
+            } else {
+              console.warn(`[ProfileSetupScreen] Photo ${i + 1} uploaded but no URL in response`);
+            }
+          } else {
+            const errorResult = await uploadResponse.json().catch(() => ({}));
+            console.error(`[ProfileSetupScreen] Photo ${i + 1} upload failed:`, JSON.stringify(errorResult, null, 2));
+          }
+        }
+
+        console.log('[ProfileSetupScreen] Photos uploaded:', uploadedPhotoUrls.length);
+        console.log('-'.repeat(60));
+
+        // Step 2: Save profile data
+        console.log('='.repeat(60));
+        console.log('[ProfileSetupScreen] Step 2: Saving profile data');
+        console.log('='.repeat(60));
+
+        const endpoint = '/users/profile';
+        const fullUrl = `${API_BASE_URL}${endpoint}`;
+
+        console.log('[ProfileSetupScreen] URL:', fullUrl);
+        console.log('[ProfileSetupScreen] Method: PUT');
+        console.log('[ProfileSetupScreen] Authorization: Bearer token present');
+        console.log('[ProfileSetupScreen] Request body:', JSON.stringify(profileData, null, 2));
+        console.log('-'.repeat(60));
+
+        const response = await fetch(fullUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(profileData),
+        });
+
+        console.log('[ProfileSetupScreen] Response status:', response.status, response.statusText);
+
+        const responseData = await response.json().catch(() => ({}));
+        console.log('[ProfileSetupScreen] Response body:', JSON.stringify(responseData, null, 2));
+        console.log('='.repeat(60));
+
+        if (!response.ok) {
+          console.error('[ProfileSetupScreen] Failed to save profile to backend');
+          Alert.alert(
+            'Error',
+            'Failed to save profile. Please try again.',
+            [{ text: 'OK' }]
+          );
+          setIsSaving(false);
+          return;
+        }
+
+        console.log('[ProfileSetupScreen] Profile saved to backend successfully');
+
+        // Update local state with uploaded photo URLs if available
+        console.log('[ProfileSetupScreen] Updating local user state');
+        updateUser({
+          name,
+          age: parseInt(age),
+          gender: gender as any,
+          interestedIn: interestedIn as any,
+          photos: uploadedPhotoUrls.length > 0 ? uploadedPhotoUrls : photos,
+          bio,
+          interests,
+          location: { city },
+          preferences: { ageRange, maxDistance },
+        });
+
+        console.log('[ProfileSetupScreen] Calling completeProfileSetup');
+        completeProfileSetup();
+        console.log('[ProfileSetupScreen] Profile setup complete');
+      } catch (error) {
+        console.error('[ProfileSetupScreen] Error saving profile:', error);
+        Alert.alert(
+          'Error',
+          'Network error. Please check your connection and try again.',
+          [{ text: 'OK' }]
+        );
+        setIsSaving(false);
+        return;
+      }
+
+      setIsSaving(false);
+      // Navigation is handled automatically by RootNavigator
+      // when hasCompletedProfileSetup becomes true
     }
-  }, [currentStepIndex, name, age, gender, interestedIn, photos, bio, interests, city, ageRange, maxDistance, updateUser, completeProfileSetup, navigation]);
+  }, [currentStepIndex, currentStep, name, age, gender, interestedIn, photos, bio, interests, city, ageRange, maxDistance, updateUser, completeProfileSetup, email, googleUserId, accessToken]);
 
   const handleBack = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -479,9 +644,10 @@ export const ProfileSetupScreen: React.FC = () => {
         {/* Footer */}
         <View style={styles.footer}>
           <AnimatedButton
-            title={currentStepIndex === STEPS.length - 1 ? 'Complete Setup' : 'Continue'}
+            title={currentStepIndex === STEPS.length - 1 ? (isSaving ? 'Saving...' : 'Complete Setup') : 'Continue'}
             onPress={handleNext}
-            disabled={!canProceed}
+            disabled={!canProceed || isSaving}
+            loading={isSaving}
             fullWidth
             size="large"
           />

@@ -33,7 +33,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
-import { useUser, useMatches } from '../../context';
+import { useUser, useMatches, useAuth } from '../../context';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -489,6 +490,8 @@ export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const { user } = useUser();
   const { matches } = useMatches();
+  const { logout } = useAuth();
+  const { signOut: googleSignOut } = useGoogleAuth();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string>('premium');
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
@@ -508,6 +511,30 @@ export const ProfileScreen: React.FC = () => {
     setSelectedPhotoIndex(index);
     setShowPhotoViewer(true);
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            console.log('[ProfileScreen] Logout initiated');
+            console.log('[ProfileScreen] Step 1: Calling Google signOut');
+            await googleSignOut();
+            console.log('[ProfileScreen] Step 2: Google signOut completed');
+            console.log('[ProfileScreen] Step 3: Calling auth context logout');
+            logout();
+            console.log('[ProfileScreen] Step 4: Auth context logout completed');
+          },
+        },
+      ]
+    );
+  }, [logout, googleSignOut]);
 
   const displayUser = user || {
     name: 'Arjun',
@@ -771,8 +798,18 @@ export const ProfileScreen: React.FC = () => {
           </BentoBox>
         </View>
 
+        {/* Logout Button */}
+        <Animated.View entering={FadeInUp.delay(800).springify()} style={styles.logoutSection}>
+          <Pressable style={styles.logoutButton} onPress={handleLogout}>
+            <View style={styles.logoutIconContainer}>
+              <Ionicons name="log-out-outline" size={22} color="#FF4444" />
+            </View>
+            <Text style={styles.logoutText}>Log Out</Text>
+          </Pressable>
+        </Animated.View>
+
         {/* Premium CTA - Special card */}
-        <Animated.View entering={FadeInUp.delay(800).springify()} style={styles.premiumSection}>
+        <Animated.View entering={FadeInUp.delay(850).springify()} style={styles.premiumSection}>
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1685,5 +1722,34 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textMuted,
     marginTop: 4,
+  },
+  // Logout Section
+  logoutSection: {
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0D0D0D',
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.3)',
+    gap: spacing.sm,
+  },
+  logoutIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 68, 68, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoutText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: '#FF4444',
   },
 });

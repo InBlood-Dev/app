@@ -150,24 +150,41 @@ export const LoginScreen: React.FC = () => {
   }));
 
   const handleGoogleLogin = useCallback(async () => {
+    console.log('[LoginScreen] handleGoogleLogin called');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
+      console.log('[LoginScreen] Step 1: Calling Google signIn');
       const result = await signIn();
 
+      console.log('[LoginScreen] Step 2: Google signIn result:', result ? 'success' : 'null/cancelled');
+
       if (result) {
-        // Pass user info directly to auth context
-        const success = await googleLogin(result.user);
+        console.log('[LoginScreen] User info from Google:');
+        console.log('[LoginScreen]   - ID:', result.user.id);
+        console.log('[LoginScreen]   - Email:', result.user.email);
+        console.log('[LoginScreen]   - Name:', result.user.name);
+
+        // Pass auth data (user + access token) to auth context
+        console.log('[LoginScreen] Step 3: Calling googleLogin with auth data');
+        const success = await googleLogin(result);
+
+        console.log('[LoginScreen] Step 4: googleLogin result:', success ? 'success' : 'failed');
 
         if (!success) {
+          console.log('[LoginScreen] Login failed - showing alert');
           Alert.alert(
             'Login Failed',
             'Unable to sign in with Google. Please try again.',
             [{ text: 'OK' }]
           );
+        } else {
+          console.log('[LoginScreen] Login successful - navigation will be handled by RootNavigator');
         }
         // Navigation is handled automatically by RootNavigator
         // when isAuthenticated becomes true
+      } else {
+        console.log('[LoginScreen] Sign-in was cancelled or returned null');
       }
       // If cancelled (result is null), just return to login screen (no error needed)
     } catch (error) {
