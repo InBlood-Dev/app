@@ -35,7 +35,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type RootStackParamList = {
   MatchScreen: { match: Match };
-  ChatScreen: { matchId: string; profile: any };
+  ChatScreen: { matchId: string; conversationId: string; profile: any };
   Discover: undefined;
 };
 
@@ -359,6 +359,7 @@ export const MatchScreen: React.FC = () => {
     dismissMatchNotification();
     navigation.replace('ChatScreen', {
       matchId: match.id,
+      conversationId: match.conversationId,
       profile: match.profile,
     });
   }, [navigation, match, dismissMatchNotification]);

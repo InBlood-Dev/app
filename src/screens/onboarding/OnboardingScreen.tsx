@@ -55,12 +55,12 @@ const slides: OnboardingSlide[] = [
 
 // Profile images for the onboarding - Indian faces
 const PROFILE_IMAGES = [
-  'https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=200&h=200&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?w=200&h=200&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1615109398623-88346a601842?w=200&h=200&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1594744803329-e58b31de8bf5?w=200&h=200&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1583195764036-6dc248ac07d9?w=200&h=200&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1611432579699-484f7990b127?w=200&h=200&fit=crop', // Indian woman
+  'https://images.pexels.com/photos/12713394/pexels-photo-12713394.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Indian man in sherwani
+  'https://images.pexels.com/photos/7442282/pexels-photo-7442282.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Indian woman in red saree
+  'https://images.pexels.com/photos/15854251/pexels-photo-15854251.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Indian man Holi portrait
+  'https://images.pexels.com/photos/18427477/pexels-photo-18427477.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Young Indian woman
+  'https://images.pexels.com/photos/3885344/pexels-photo-3885344.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Indian man close-up
+  'https://images.pexels.com/photos/27212065/pexels-photo-27212065.jpeg?auto=compress&cs=tinysrgb&w=200&h=200&fit=crop', // Indian bride smiling
 ];
 
 // First slide - Location/Nearby with circular profiles

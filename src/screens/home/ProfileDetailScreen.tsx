@@ -11,6 +11,8 @@ import {
   PanResponder,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -30,7 +32,8 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { ActionButton, InterestChip } from '../../components';
-import { useMatches } from '../../context';
+import { useMatches, useUser } from '../../context';
+import { trackProfileView, createOrGetConversation } from '../../services/interactions.service';
 import { Profile, SwipeDirection } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius, shadows } from '../../theme';
 
@@ -44,7 +47,7 @@ const COLLAPSED_HEIGHT = 55;
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.70;
 
 type RootStackParamList = {
-  ProfileDetail: { profile: Profile; isChat?: boolean };
+  ProfileDetail: { profile: Profile; isMatched?: boolean };
   MatchScreen: { match: any };
 };
 
@@ -55,6 +58,7 @@ const PhotoSheet: React.FC<{
   photos: string[];
   onPhotoPress: (index: number) => void;
 }> = ({ photos, onPhotoPress }) => {
+  const sheetInsets = useSafeAreaInsets();
   const translateY = useSharedValue(0);
   const contextY = useSharedValue(0);
   const isExpanded = useSharedValue(false);
@@ -183,7 +187,7 @@ const PhotoSheet: React.FC<{
 
       {/* Sheet */}
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[sheetStyles.container, sheetAnimatedStyle]}>
+        <Animated.View style={[sheetStyles.container, { bottom: -(EXPANDED_HEIGHT - COLLAPSED_HEIGHT) + sheetInsets.bottom }, sheetAnimatedStyle]}>
           {/* Handle */}
           <View style={sheetStyles.handleContainer}>
             <Animated.View style={[sheetStyles.handle, handleIndicatorStyle]} />
@@ -350,14 +354,50 @@ export const ProfileDetailScreen: React.FC = () => {
   const route = useRoute<ProfileDetailRouteProp>();
   const insets = useSafeAreaInsets();
   const { swipeProfile } = useMatches();
+  const { fetchOtherUser } = useUser();
 
-  const { profile, isChat = false } = route.params;
+  const { profile: initialProfile, isMatched = false } = route.params;
+  const [profile, setProfile] = useState<Profile>(initialProfile);
+  const [isLoading, setIsLoading] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
 
-  const handleSwipe = useCallback((direction: SwipeDirection) => {
-    const match = swipeProfile(profile.id, direction);
+  // Lazy load full profile if only partial data was passed
+  React.useEffect(() => {
+    const loadFullProfile = async () => {
+      // If profile doesn't have prompts, it might be partial - fetch full data
+      if (profile?.id && !profile.prompts) {
+        setIsLoading(true);
+        const fullProfile = await fetchOtherUser(profile.id);
+        if (fullProfile) {
+          // Preserve stats from initial profile if full profile doesn't have them
+          // (GET /users/:userId may not return stats)
+          setProfile({
+            ...fullProfile,
+            stats: fullProfile.stats?.seductions || fullProfile.stats?.likes
+              ? fullProfile.stats
+              : initialProfile.stats,
+          });
+        }
+        setIsLoading(false);
+      }
+    };
+
+    loadFullProfile();
+  }, [profile?.id, profile.prompts, fetchOtherUser, initialProfile.stats]);
+
+  // Track profile view (fire-and-forget, 24h debounce on backend)
+  React.useEffect(() => {
+    if (initialProfile?.id) {
+      trackProfileView(initialProfile.id, 'profile').catch(() => {});
+    }
+  }, [initialProfile?.id]);
+
+  const handleSwipe = useCallback(async (direction: SwipeDirection) => {
     navigation.goBack();
+
+    // Swipe is now async
+    const match = await swipeProfile(profile.id, direction);
 
     if (match) {
       setTimeout(() => {
@@ -365,6 +405,30 @@ export const ProfileDetailScreen: React.FC = () => {
       }, 300);
     }
   }, [profile, swipeProfile, navigation]);
+
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const handleChat = useCallback(async () => {
+    if (isChatLoading) return;
+    setIsChatLoading(true);
+    try {
+      const response = await createOrGetConversation(profile.id);
+      if (response.success && response.data) {
+        navigation.navigate('ChatScreen', {
+          matchId: null,
+          conversationId: response.data.conversation_id,
+          profile,
+        });
+      } else {
+        Alert.alert('Error', response.message || 'Could not start conversation.');
+      }
+    } catch (error: any) {
+      const message = error?.response?.data?.message || 'Could not start conversation. Please try again.';
+      Alert.alert('Error', message);
+    } finally {
+      setIsChatLoading(false);
+    }
+  }, [profile, navigation, isChatLoading]);
 
   return (
     <View style={styles.container}>
@@ -378,9 +442,16 @@ export const ProfileDetailScreen: React.FC = () => {
 
       {/* Content */}
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: COLLAPSED_HEIGHT + 60 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: COLLAPSED_HEIGHT + (isMatched ? 60 : 140) + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Loading indicator for lazy loading */}
+        {isLoading && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        )}
+
         {/* Profile Info Card */}
         <Animated.View entering={FadeInUp.delay(100)} style={styles.infoCard}>
           {/* Stats Section with Single Rectangle */}
@@ -399,7 +470,7 @@ export const ProfileDetailScreen: React.FC = () => {
               {/* Left Stats */}
               <View style={styles.statsSide}>
                 <Text style={styles.statNumber}>
-                  {profile.stats?.rejections ? `${(profile.stats.rejections / 1000).toFixed(1)}k` : '0'}
+                  {profile.stats?.seductions?.toLocaleString() || '0'}
                 </Text>
                 <Text style={styles.statLabel}>SEDUCTIONS</Text>
               </View>
@@ -443,7 +514,7 @@ export const ProfileDetailScreen: React.FC = () => {
               <Ionicons name="location" size={16} color={colors.textSecondary} />
               <Text style={styles.location}>
                 {profile.location.city}
-                {profile.location.distance && ` • ${profile.location.distance} km away`}
+                {profile.location.distance != null && profile.location.distance > 0 && ` • ${profile.location.distance} km away`}
               </Text>
             </View>
 
@@ -490,30 +561,8 @@ export const ProfileDetailScreen: React.FC = () => {
             </Animated.View>
           )}
 
-          {/* Connected Accounts */}
-          <Animated.View entering={FadeInDown.delay(280)} style={styles.section}>
-            <Text style={styles.sectionTitle}>Connected Accounts</Text>
-            <View style={styles.connectedAccountsContainer}>
-              <View style={styles.connectedAccount}>
-                <View style={styles.accountIconContainer}>
-                  <Ionicons name="musical-notes" size={24} color="#1DB954" />
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountName}>Spotify</Text>
-                  <Text style={styles.accountStatus}>Top Artists: The Weeknd, Drake</Text>
-                </View>
-              </View>
-              <View style={styles.connectedAccount}>
-                <View style={styles.accountIconContainer}>
-                  <Ionicons name="camera" size={24} color="#E1306C" />
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountName}>Instagram</Text>
-                  <Text style={styles.accountStatus}>@{profile.name.toLowerCase()}</Text>
-                </View>
-              </View>
-            </View>
-          </Animated.View>
+          {/* Connected Accounts - Backend doesn't provide this yet */}
+          {/* Hidden until backend support is added */}
 
           {/* Interests */}
           {profile.interests.length > 0 && (
@@ -531,6 +580,16 @@ export const ProfileDetailScreen: React.FC = () => {
         {/* Bottom spacing */}
         <View style={{ height: 60 }} />
       </ScrollView>
+
+      {/* Action Buttons - shown when not opened from chat */}
+      {!isMatched && (
+        <View style={[styles.actionBar, { bottom: COLLAPSED_HEIGHT + 12 + insets.bottom }]}>
+          <ActionButton type="pass" onPress={() => handleSwipe('left')} size="medium" />
+          <ActionButton type="superLike" onPress={() => handleSwipe('up')} size="medium" />
+          <ActionButton type="like" onPress={() => handleSwipe('right')} size="large" />
+          <ActionButton type="chat" onPress={handleChat} size="medium" disabled={isChatLoading} />
+        </View>
+      )}
 
       {/* Photo Viewer Modal */}
       <PhotoViewer
@@ -568,9 +627,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 10,
   },
+  actionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.lg,
+    zIndex: 5,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingTop: spacing.md,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    zIndex: 100,
   },
   infoCard: {
     backgroundColor: colors.background,
@@ -595,11 +675,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBBC05',
     opacity: 0.6,
     zIndex: -1,
+    // iOS glow via shadow (no effect on Android)
     shadowColor: '#FBBC05',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 30,
-    elevation: 20,
+    // No elevation — on Android it raises the solid shape above everything
   },
   rightEllipse: {
     position: 'absolute',
@@ -614,7 +695,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 30,
-    elevation: 20,
   },
   statsRectangle: {
     width: SCREEN_WIDTH - spacing.lg * 2,
@@ -625,6 +705,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
     backgroundColor: '#0D0D0D',
     zIndex: 0,
+    elevation: 1,
   },
   statsContent: {
     flexDirection: 'row',
@@ -635,6 +716,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     position: 'absolute',
     zIndex: 1,
+    elevation: 2,
   },
   statsSide: {
     alignItems: 'center',
@@ -662,6 +744,7 @@ const styles = StyleSheet.create({
     borderRadius: 75,
     overflow: 'hidden',
     zIndex: 2,
+    elevation: 3,
     position: 'absolute',
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -916,7 +999,6 @@ const sheetStyles = StyleSheet.create({
   },
   container: {
     position: 'absolute',
-    bottom: -(EXPANDED_HEIGHT - COLLAPSED_HEIGHT),
     left: 0,
     right: 0,
     height: EXPANDED_HEIGHT,

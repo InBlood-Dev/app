@@ -6,29 +6,35 @@ import {
   TextInput,
   FlatList,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   Image,
   Alert,
+  ActionSheetIOS,
+  Modal,
+  Keyboard,
 } from 'react-native';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Animated, {
   FadeIn,
   FadeInDown,
-  FadeInUp,
   SlideInUp,
+  useAnimatedStyle,
+  interpolate,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ChatBubble, TypingIndicator } from '../../components';
+import { ChatBubble, TypingIndicator, OpeningMoveCard } from '../../components';
 import { useChat, useUser } from '../../context';
 import { Message, Profile } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { blockUser, unblockUser } from '../../services/blocking.service';
+import { getOnlineStatus } from '../../utils/timeUtils';
 
 type RootStackParamList = {
-  ChatScreen: { matchId: string; profile: Profile };
-  ProfileDetail: { profile: Profile };
+  ChatScreen: { matchId?: string | null; conversationId: string; profile: Profile };
+  ProfileDetail: { profile: Profile; isMatched?: boolean };
 };
 
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'ChatScreen'>;
@@ -37,23 +43,103 @@ export const ChatScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<ChatScreenRouteProp>();
   const insets = useSafeAreaInsets();
-  const { initializeChat, sendMessage, getMessages, typingUsers } = useChat();
+  const {
+    subscribeToConversation,
+    unsubscribeFromConversation,
+    sendMessage,
+    getMessages,
+    typingUsers,
+    markAsRead,
+    setTyping,
+    deleteMessage,
+    muteConversation,
+    unmuteConversation,
+    isConversationMuted,
+  } = useChat();
   const { user } = useUser();
 
-  const { matchId, profile } = route.params;
+  const { matchId, conversationId, profile } = route.params;
   const [messageText, setMessageText] = useState('');
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
+  const [showMuteOptions, setShowMuteOptions] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const inputRef = useRef<TextInput>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const messages = getMessages(matchId);
-  const isTyping = typingUsers.has(matchId);
+  // Keyboard animation for edge-to-edge compatible input positioning
+  const { height: keyboardHeight, progress } = useReanimatedKeyboardAnimation();
 
+  // Animated spacer pushes content up by exact keyboard height
+  const spacerStyle = useAnimatedStyle(() => ({
+    height: Math.abs(keyboardHeight.value),
+  }));
+
+  // Input paddingBottom transitions: insets.bottom (above nav bar) → 0 (keyboard replaces nav bar)
+  const inputAnimatedStyle = useAnimatedStyle(() => ({
+    paddingBottom: interpolate(
+      progress.value,
+      [0, 1],
+      [insets.bottom + spacing.sm, spacing.sm]
+    ),
+  }));
+
+  const messages = getMessages(conversationId);
+  const isTyping = typingUsers.has(conversationId);
+
+  const onlineStatus = getOnlineStatus(profile.lastActive);
+
+  // Subscribe to conversation on mount, unsubscribe on unmount
   useEffect(() => {
-    // Initialize chat with mock messages if it doesn't exist
-    initializeChat(matchId, user?.id || 'current-user', profile.id);
-  }, [matchId, user?.id, profile.id, initializeChat]);
+    console.log('[ChatScreen] Subscribing to conversation:', conversationId);
+    subscribeToConversation(conversationId, profile.id);
 
+    return () => {
+      console.log('[ChatScreen] Unsubscribing from conversation:', conversationId);
+      unsubscribeFromConversation(conversationId);
+    };
+  }, [conversationId, profile.id, subscribeToConversation, unsubscribeFromConversation]);
+
+  // Mark messages as read when screen is focused
   useEffect(() => {
-    // Scroll to bottom when new messages arrive
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('[ChatScreen] Screen focused, marking as read:', conversationId);
+      markAsRead(conversationId);
+    });
+
+    return unsubscribe;
+  }, [navigation, conversationId, markAsRead]);
+
+  // Check mute status on mount
+  useEffect(() => {
+    const checkMuteStatus = async () => {
+      try {
+        const muted = await isConversationMuted(conversationId);
+        setIsMuted(muted);
+      } catch (error) {
+        console.error('[ChatScreen] Failed to check mute status:', error);
+      }
+    };
+
+    checkMuteStatus();
+  }, [conversationId, isConversationMuted]);
+
+  // Cleanup typing timeout on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        console.log('[ChatScreen] Clearing typing timeout on unmount');
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+        // Clear typing indicator on unmount
+        setTyping(conversationId, false);
+      }
+    };
+  }, [conversationId, setTyping]);
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -61,76 +147,250 @@ export const ChatScreen: React.FC = () => {
     }
   }, [messages.length]);
 
-  const handleSend = useCallback(() => {
+  // Scroll to bottom when keyboard shows
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+    return () => {
+      showSub.remove();
+    };
+  }, []);
+
+  const handleSend = useCallback(async () => {
     if (!messageText.trim()) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    sendMessage(matchId, {
-      senderId: user?.id || 'current-user',
-      text: messageText.trim(),
-      type: 'text',
-    });
-    setMessageText('');
-  }, [messageText, matchId, sendMessage, user?.id]);
+
+    const messageToSend = messageText.trim();
+    setMessageText(''); // Clear input immediately for better UX
+
+    try {
+      await sendMessage(conversationId, {
+        senderId: user?.id || 'current-user',
+        text: messageToSend,
+        type: 'text',
+      });
+    } catch (error) {
+      console.error('[ChatScreen] Failed to send message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+      // Restore message text on error
+      setMessageText(messageToSend);
+    }
+  }, [messageText, conversationId, sendMessage, user?.id]);
+
+  // Handle typing indicator
+  const handleTextChange = useCallback((text: string) => {
+    setMessageText(text);
+
+    // Clear existing typing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set typing indicator
+    if (text.length > 0) {
+      setTyping(conversationId, true);
+
+      // Clear typing indicator after 3 seconds of no typing
+      typingTimeoutRef.current = setTimeout(() => {
+        setTyping(conversationId, false);
+      }, 3000);
+    } else {
+      setTyping(conversationId, false);
+    }
+  }, [conversationId, setTyping]);
+
+  const handleOpeningMoveReply = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    inputRef.current?.focus();
+  }, []);
 
   const handleProfilePress = useCallback(() => {
-    navigation.navigate('ProfileDetail', { profile });
+    navigation.navigate('ProfileDetail', { profile, isMatched: !!matchId });
   }, [navigation, profile]);
 
-  const handleVideoCall = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      'Video Call',
-      `Start a video call with ${profile.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call',
-          onPress: () => Alert.alert('Calling...', `Connecting video call with ${profile.name}...`)
-        },
-      ]
-    );
-  }, [profile.name]);
+  const handleMessageLongPress = useCallback((message: Message) => {
+    const isOwnMessage = message.senderId === (user?.id || 'current-user');
+    if (!isOwnMessage) return; // Only allow deleting own messages
 
-  const handleVoiceCall = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      'Voice Call',
-      `Start a voice call with ${profile.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call',
-          onPress: () => Alert.alert('Calling...', `Connecting voice call with ${profile.name}...`)
-        },
-      ]
-    );
-  }, [profile.name]);
+    // Check if message is within 1-hour window for "delete for everyone"
+    const oneHourInMs = 60 * 60 * 1000;
+    const timeSinceSent = Date.now() - message.timestamp.getTime();
+    const canDeleteForEveryone = timeSinceSent <= oneHourInMs;
 
-  const handleAttachment = useCallback(() => {
+    const options = ['Delete for Me'];
+    if (canDeleteForEveryone) {
+      options.push('Delete for Everyone');
+    }
+    options.push('Cancel');
+
+    const destructiveButtonIndex = canDeleteForEveryone ? 1 : 0;
+    const cancelButtonIndex = options.length - 1;
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          destructiveButtonIndex,
+          cancelButtonIndex,
+          title: 'Delete Message',
+        },
+        async (buttonIndex) => {
+          if (buttonIndex === 0) {
+            // Delete for Me
+            try {
+              await deleteMessage(conversationId, message.id, false);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete message. Please try again.');
+            }
+          } else if (buttonIndex === 1 && canDeleteForEveryone) {
+            // Delete for Everyone
+            Alert.alert(
+              'Delete for Everyone',
+              'This message will be deleted for both you and the recipient.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await deleteMessage(conversationId, message.id, true);
+                    } catch (error) {
+                      Alert.alert('Error', 'Failed to delete message. Please try again.');
+                    }
+                  },
+                },
+              ]
+            );
+          }
+        }
+      );
+    } else {
+      // Android
+      Alert.alert(
+        'Delete Message',
+        'Choose an option',
+        [
+          {
+            text: 'Delete for Me',
+            onPress: async () => {
+              try {
+                await deleteMessage(conversationId, message.id, false);
+              } catch (error) {
+                Alert.alert('Error', 'Failed to delete message. Please try again.');
+              }
+            },
+          },
+          ...(canDeleteForEveryone
+            ? [
+                {
+                  text: 'Delete for Everyone',
+                  style: 'destructive' as const,
+                  onPress: async () => {
+                    try {
+                      await deleteMessage(conversationId, message.id, true);
+                    } catch (error) {
+                      Alert.alert('Error', 'Failed to delete message. Please try again.');
+                    }
+                  },
+                },
+              ]
+            : []),
+          { text: 'Cancel', style: 'cancel' as const },
+        ]
+      );
+    }
+  }, [conversationId, deleteMessage, user?.id]);
+
+  const handleMenu = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
-      'Add Attachment',
-      'Choose what to send',
-      [
-        { text: 'Photo', onPress: () => Alert.alert('Photo', 'Opening camera roll...') },
-        { text: 'GIF', onPress: () => Alert.alert('GIF', 'Opening GIF picker...') },
-        { text: 'Location', onPress: () => Alert.alert('Location', 'Sharing location...') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    setShowMuteOptions(false);
+    setShowMenuModal(true);
   }, []);
 
-  const handleEmoji = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Add a random emoji to the message
-    const emojis = ['😊', '❤️', '😂', '🥰', '😍', '🔥', '✨', '💕', '😘', '🙈'];
-    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-    setMessageText(prev => prev + randomEmoji);
+  const closeMenu = useCallback(() => {
+    setShowMenuModal(false);
+    setShowMuteOptions(false);
   }, []);
+
+  const handleMuteSelect = useCallback(async (muteUntil: Date | null) => {
+    closeMenu();
+    try {
+      await muteConversation(conversationId, muteUntil);
+      setIsMuted(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert('Error', 'Failed to mute conversation.');
+    }
+  }, [conversationId, muteConversation, closeMenu]);
+
+  const handleUnmuteSelect = useCallback(async () => {
+    closeMenu();
+    try {
+      await unmuteConversation(conversationId);
+      setIsMuted(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert('Error', 'Failed to unmute conversation.');
+    }
+  }, [conversationId, unmuteConversation, closeMenu]);
+
+  const handleBlockSelect = useCallback(async () => {
+    closeMenu();
+    if (isBlocked) {
+      try {
+        await unblockUser(profile.id);
+        setIsBlocked(false);
+      } catch {
+        Alert.alert('Error', 'Failed to unblock user.');
+      }
+    } else {
+      Alert.alert(
+        'Block User',
+        `Are you sure you want to block ${profile.name}? You will no longer receive messages from them.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Block',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await blockUser(profile.id);
+                setIsBlocked(true);
+                navigation.goBack();
+              } catch {
+                Alert.alert('Error', 'Failed to block user.');
+              }
+            },
+          },
+        ]
+      );
+    }
+  }, [isBlocked, profile.id, profile.name, navigation, closeMenu]);
+
+  const handleReportSelect = useCallback(() => {
+    closeMenu();
+    Alert.alert('Report User', 'This feature is coming soon.');
+  }, [closeMenu]);
 
   const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
     const isOwn = item.senderId === (user?.id || 'current-user');
+
+    if (item.type === 'opening_move') {
+      return (
+        <OpeningMoveCard
+          message={item}
+          isOwn={isOwn}
+          onReply={isOwn ? undefined : handleOpeningMoveReply}
+        />
+      );
+    }
+
     const showTimestamp = index === 0 ||
       messages[index - 1]?.senderId !== item.senderId ||
       (item.timestamp.getTime() - messages[index - 1]?.timestamp.getTime()) > 300000; // 5 minutes
@@ -140,9 +400,10 @@ export const ChatScreen: React.FC = () => {
         message={item}
         isOwn={isOwn}
         showTimestamp={showTimestamp}
+        onLongPress={handleMessageLongPress}
       />
     );
-  }, [user?.id, messages]);
+  }, [user?.id, messages, handleMessageLongPress, handleOpeningMoveReply]);
 
   const renderListFooter = useCallback(() => {
     if (!isTyping) return null;
@@ -161,29 +422,28 @@ export const ChatScreen: React.FC = () => {
         </Pressable>
 
         <Pressable style={styles.profileInfo} onPress={handleProfilePress}>
-          <Image source={{ uri: profile.photos[0] }} style={styles.avatar} />
+          {profile.photos[0] ? (
+            <Image source={{ uri: profile.photos[0] }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Ionicons name="person" size={22} color={colors.textSecondary} />
+            </View>
+          )}
           <View style={styles.profileText}>
             <Text style={styles.profileName}>{profile.name}</Text>
-            <Text style={styles.profileStatus}>Online</Text>
+            <Text style={[styles.profileStatus, !onlineStatus.isOnline && styles.profileStatusOffline]}>
+              {onlineStatus.text}
+            </Text>
           </View>
         </Pressable>
 
-        <View style={styles.headerActions}>
-          <Pressable style={styles.headerButton} onPress={handleVideoCall}>
-            <Ionicons name="videocam" size={24} color={colors.text} />
-          </Pressable>
-          <Pressable style={styles.headerButton} onPress={handleVoiceCall}>
-            <Ionicons name="call" size={22} color={colors.text} />
-          </Pressable>
-        </View>
+        <Pressable style={styles.headerButton} onPress={handleMenu}>
+          <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
+        </Pressable>
       </Animated.View>
 
-      {/* Messages */}
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
+      {/* Messages + Input */}
+      <View style={styles.keyboardView}>
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -208,43 +468,165 @@ export const ChatScreen: React.FC = () => {
         {/* Input */}
         <Animated.View
           entering={SlideInUp.delay(300)}
-          style={[styles.inputContainer, { paddingBottom: insets.bottom + spacing.sm }]}
+          style={[styles.inputContainer, inputAnimatedStyle]}
         >
-          <Pressable style={styles.attachButton} onPress={handleAttachment}>
-            <Ionicons name="add-circle" size={28} color={colors.primary} />
-          </Pressable>
+          <View style={styles.inputRow}>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                placeholder="Type a message..."
+                placeholderTextColor={colors.textMuted}
+                value={messageText}
+                onChangeText={handleTextChange}
+                multiline
+                maxLength={1000}
+              />
+            </View>
 
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="Type a message..."
-              placeholderTextColor={colors.textMuted}
-              value={messageText}
-              onChangeText={setMessageText}
-              multiline
-              maxLength={1000}
-            />
-            <Pressable style={styles.emojiButton} onPress={handleEmoji}>
-              <Ionicons name="happy-outline" size={24} color={colors.textMuted} />
+            <Pressable
+              style={[
+                styles.sendButton,
+                messageText.trim() && styles.sendButtonActive,
+              ]}
+              onPress={handleSend}
+              disabled={!messageText.trim()}
+            >
+              <Ionicons
+                name="send"
+                size={20}
+                color={messageText.trim() ? colors.text : colors.textMuted}
+              />
             </Pressable>
           </View>
-
-          <Pressable
-            style={[
-              styles.sendButton,
-              messageText.trim() && styles.sendButtonActive,
-            ]}
-            onPress={handleSend}
-            disabled={!messageText.trim()}
-          >
-            <Ionicons
-              name="send"
-              size={20}
-              color={messageText.trim() ? colors.text : colors.textMuted}
-            />
-          </Pressable>
         </Animated.View>
-      </KeyboardAvoidingView>
+
+        {/* Animated spacer — grows to keyboard height, pushing content up */}
+        <Animated.View style={spacerStyle} />
+      </View>
+
+      {/* Menu Modal */}
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMenu}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeMenu}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{profile.name}</Text>
+              <Pressable style={styles.modalCloseButton} onPress={closeMenu}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <View style={styles.modalDivider} />
+
+            {!showMuteOptions ? (
+              <>
+                {/* Mute / Unmute */}
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    if (isMuted) {
+                      handleUnmuteSelect();
+                    } else {
+                      setShowMuteOptions(true);
+                    }
+                  }}
+                >
+                  <Ionicons
+                    name={isMuted ? 'notifications' : 'notifications-off'}
+                    size={22}
+                    color={colors.text}
+                  />
+                  <Text style={styles.modalOptionText}>
+                    {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                  </Text>
+                </Pressable>
+
+                {/* Block / Unblock */}
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    handleBlockSelect();
+                  }}
+                >
+                  <Ionicons
+                    name={isBlocked ? 'lock-open' : 'ban'}
+                    size={22}
+                    color={colors.error}
+                  />
+                  <Text style={[styles.modalOptionText, { color: colors.error }]}>
+                    {isBlocked ? 'Unblock User' : 'Block User'}
+                  </Text>
+                </Pressable>
+
+                {/* Report */}
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    handleReportSelect();
+                  }}
+                >
+                  <Ionicons name="flag" size={22} color={colors.warning} />
+                  <Text style={[styles.modalOptionText, { color: colors.warning }]}>
+                    Report User
+                  </Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* Mute Duration Options */}
+                <Pressable
+                  style={styles.modalBackRow}
+                  onPress={() => setShowMuteOptions(false)}
+                >
+                  <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+                  <Text style={styles.modalSubtitle}>Mute for...</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => handleMuteSelect(new Date(Date.now() + 60 * 60 * 1000))}
+                >
+                  <Ionicons name="time-outline" size={22} color={colors.text} />
+                  <Text style={styles.modalOptionText}>1 hour</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => handleMuteSelect(new Date(Date.now() + 8 * 60 * 60 * 1000))}
+                >
+                  <Ionicons name="time-outline" size={22} color={colors.text} />
+                  <Text style={styles.modalOptionText}>8 hours</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => handleMuteSelect(new Date(Date.now() + 24 * 60 * 60 * 1000))}
+                >
+                  <Ionicons name="time-outline" size={22} color={colors.text} />
+                  <Text style={styles.modalOptionText}>24 hours</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.modalOption}
+                  onPress={() => handleMuteSelect(null)}
+                >
+                  <Ionicons name="volume-mute" size={22} color={colors.text} />
+                  <Text style={styles.modalOptionText}>Until I unmute</Text>
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -281,6 +663,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     marginRight: spacing.sm,
   },
+  avatarPlaceholder: {
+    backgroundColor: colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   profileText: {
     flex: 1,
   },
@@ -293,9 +680,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.success,
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
+  profileStatusOffline: {
+    color: colors.textMuted,
   },
   headerButton: {
     width: 40,
@@ -332,19 +718,15 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     backgroundColor: colors.card,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  attachButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
   },
   inputWrapper: {
     flex: 1,
@@ -354,7 +736,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.xl,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    marginHorizontal: spacing.xs,
+    marginRight: spacing.sm,
     minHeight: 44,
     maxHeight: 120,
   },
@@ -364,12 +746,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     paddingVertical: spacing.sm,
     maxHeight: 100,
-  },
-  emojiButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   sendButton: {
     width: 40,
@@ -381,5 +757,65 @@ const styles = StyleSheet.create({
   },
   sendButtonActive: {
     backgroundColor: colors.primary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: spacing.sm,
+  },
+  modalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: colors.text,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.cardLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+  },
+  modalOptionText: {
+    fontSize: fontSize.md,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
+  modalBackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
+  },
+  modalSubtitle: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.medium,
   },
 });

@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius, shadows } from '../theme';
 
 interface ActionButtonProps {
-  type: 'pass' | 'like' | 'superLike' | 'undo';
+  type: 'pass' | 'like' | 'superLike' | 'undo' | 'chat';
   onPress: () => void;
   size?: 'small' | 'medium' | 'large';
   disabled?: boolean;
@@ -44,6 +44,12 @@ const buttonConfig = {
     colors: ['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.1)'],
     iconColor: colors.info,
     borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  chat: {
+    icon: 'chatbubble-ellipses',
+    colors: ['#4FC3F7', '#0288D1'],
+    iconColor: '#FFFFFF',
+    borderColor: 'transparent',
   },
 };
 

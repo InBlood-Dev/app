@@ -6,10 +6,11 @@ export type RootStackParamList = {
   ProfileSetup: undefined;
   MainTabs: undefined;
   MatchScreen: { match: Match };
-  ProfileDetail: { profile: Profile };
-  ChatScreen: { matchId: string; profile: Profile };
+  ProfileDetail: { profile: Profile; isMatched?: boolean };
+  ChatScreen: { matchId?: string | null; conversationId: string; profile: Profile };
   EditProfile: undefined;
   Settings: undefined;
+  BlockedUsers: undefined;
 };
 
 export type AuthStackParamList = {

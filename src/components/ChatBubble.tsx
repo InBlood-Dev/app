@@ -1,20 +1,23 @@
 import React from 'react';
-import { StyleSheet, View, Text, Image } from 'react-native';
+import { StyleSheet, View, Text, Image, Pressable } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../types';
 import { colors, borderRadius, fontSize, fontWeight, spacing } from '../theme';
+import * as Haptics from 'expo-haptics';
 
 interface ChatBubbleProps {
   message: Message;
   isOwn: boolean;
   showTimestamp?: boolean;
+  onLongPress?: (message: Message) => void;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
   isOwn,
   showTimestamp = true,
+  onLongPress,
 }) => {
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -30,8 +33,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         return <Ionicons name="checkmark-done" size={12} color={colors.textMuted} />;
       case 'seen':
         return <Ionicons name="checkmark-done" size={12} color={colors.primary} />;
+      case 'failed':
+        return <Ionicons name="alert-circle" size={12} color={colors.error} />;
       default:
         return null;
+    }
+  };
+
+  const handleLongPress = () => {
+    if (onLongPress && !message.isDeleted) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      onLongPress(message);
     }
   };
 
@@ -43,23 +55,32 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         isOwn ? styles.ownContainer : styles.otherContainer,
       ]}
     >
-      <View
+      <Pressable
+        onLongPress={handleLongPress}
+        delayLongPress={500}
         style={[
           styles.bubble,
           isOwn ? styles.ownBubble : styles.otherBubble,
+          message.isDeleted && styles.deletedBubble,
         ]}
       >
-        {message.type === 'image' && message.imageUrl && (
+        {message.type === 'image' && message.mediaUrl && !message.isDeleted && (
           <Image
-            source={{ uri: message.imageUrl }}
+            source={{ uri: message.mediaUrl }}
             style={styles.image}
             resizeMode="cover"
           />
         )}
-        <Text style={[styles.text, isOwn ? styles.ownText : styles.otherText]}>
+        <Text
+          style={[
+            styles.text,
+            isOwn ? styles.ownText : styles.otherText,
+            message.isDeleted && styles.deletedText,
+          ]}
+        >
           {message.text}
         </Text>
-      </View>
+      </Pressable>
 
       {showTimestamp && (
         <View style={[styles.meta, isOwn && styles.ownMeta]}>
@@ -128,6 +149,13 @@ const styles = StyleSheet.create({
   },
   otherText: {
     color: colors.text,
+  },
+  deletedBubble: {
+    opacity: 0.6,
+  },
+  deletedText: {
+    fontStyle: 'italic',
+    color: colors.textMuted,
   },
   image: {
     width: 200,

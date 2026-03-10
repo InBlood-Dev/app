@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Dimensions, Image } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -17,13 +17,15 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface SplashScreenProps {
   onFinish: () => void;
+  shouldDismiss?: boolean;
 }
 
-export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
+export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, shouldDismiss }) => {
   const scale = useSharedValue(0.3);
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(50);
   const rotate = useSharedValue(0);
+  const hasDismissed = useRef(false);
 
   useEffect(() => {
     // Initial fade in and scale up
@@ -47,17 +49,18 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       withTiming(3, { duration: 150 }),
       withTiming(0, { duration: 150 }),
     );
+  }, []);
 
-    // Finish splash after animations
-    const timeout = setTimeout(() => {
+  // External dismiss control: fade out when shouldDismiss becomes true
+  useEffect(() => {
+    if (shouldDismiss && !hasDismissed.current) {
+      hasDismissed.current = true;
       opacity.value = withTiming(0, { duration: 300 }, () => {
         runOnJS(onFinish)();
       });
       scale.value = withTiming(0.8, { duration: 300 });
-    }, 2200);
-
-    return () => clearTimeout(timeout);
-  }, []);
+    }
+  }, [shouldDismiss]);
 
   const logoAnimatedStyle = useAnimatedStyle(() => ({
     transform: [

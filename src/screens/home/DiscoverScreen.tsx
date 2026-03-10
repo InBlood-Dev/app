@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -12,8 +12,9 @@ import {
   PanResponder,
   GestureResponderEvent,
   PanResponderGestureState,
+  ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -35,13 +36,15 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { SwipeCard, ActionButton, CARD_WIDTH, CARD_HEIGHT } from '../../components';
-import { useMatches } from '../../context';
+import { useMatches, useUser } from '../../context';
 import { SwipeDirection, Profile } from '../../types';
+import { mapInterestedInToGender } from '../../utils/filterMapping';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { trackProfileView } from '../../services/interactions.service';
+import { startPayment, getPlans } from '../../services/payment.service';
+import type { SubscriptionPlan } from '../../types';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-const FREE_SWIPE_LIMIT = 10; // Show popup after 10 swipes
 
 // Filter options
 const GENDER_OPTIONS = [
@@ -68,8 +71,9 @@ const PremiumPopup: React.FC<{
   visible: boolean;
   onClose: () => void;
   onPurchase: () => void;
-  remainingSwipes: number;
-}> = ({ visible, onClose, onPurchase, remainingSwipes }) => {
+  isProcessing?: boolean;
+  plan: SubscriptionPlan | null;
+}> = ({ visible, onClose, onPurchase, isProcessing = false, plan }) => {
   const scale = useSharedValue(1);
   const heartScale = useSharedValue(1);
 
@@ -140,48 +144,43 @@ const PremiumPopup: React.FC<{
             {/* Title */}
             <Text style={popupStyles.title}>Unlock Unlimited Likes</Text>
             <Text style={popupStyles.subtitle}>
-              You've used {FREE_SWIPE_LIMIT - remainingSwipes} of {FREE_SWIPE_LIMIT} free likes today
+              You've used all your free likes for today
             </Text>
 
             {/* Features */}
             <View style={popupStyles.features}>
-              <View style={popupStyles.featureRow}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                <Text style={popupStyles.featureText}>Unlimited likes</Text>
-              </View>
-              <View style={popupStyles.featureRow}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                <Text style={popupStyles.featureText}>See who likes you</Text>
-              </View>
-              <View style={popupStyles.featureRow}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                <Text style={popupStyles.featureText}>5 Super Likes per day</Text>
-              </View>
-              <View style={popupStyles.featureRow}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                <Text style={popupStyles.featureText}>Rewind your last swipe</Text>
-              </View>
-              <View style={popupStyles.featureRow}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                <Text style={popupStyles.featureText}>Priority in discover</Text>
-              </View>
+              {plan ? plan.features.filter(f => f.included).slice(0, 5).map((feature, index) => (
+                <View key={index} style={popupStyles.featureRow}>
+                  <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                  <Text style={popupStyles.featureText}>{feature.text}</Text>
+                </View>
+              )) : (
+                <ActivityIndicator color={colors.primary} size="small" />
+              )}
             </View>
 
             {/* Price section */}
             <View style={popupStyles.priceContainer}>
-              <Text style={popupStyles.originalPrice}>₹299/month</Text>
+              {plan?.original_price && (
+                <Text style={popupStyles.originalPrice}>
+                  ₹{plan.original_price.toLocaleString('en-IN')}{plan.period_label}
+                </Text>
+              )}
               <View style={popupStyles.priceRow}>
-                <Text style={popupStyles.price}>₹99</Text>
-                <Text style={popupStyles.pricePeriod}>/month</Text>
+                <Text style={popupStyles.price}>₹{plan?.price ?? '...'}</Text>
+                <Text style={popupStyles.pricePeriod}>{plan?.period_label ?? ''}</Text>
               </View>
-              <View style={popupStyles.savingsBadge}>
-                <Text style={popupStyles.savingsText}>SAVE 67%</Text>
-              </View>
+              {plan?.discount_label && (
+                <View style={popupStyles.savingsBadge}>
+                  <Text style={popupStyles.savingsText}>{plan.discount_label}</Text>
+                </View>
+              )}
             </View>
 
             {/* Purchase button */}
             <Pressable
-              style={popupStyles.purchaseButton}
+              style={[popupStyles.purchaseButton, isProcessing && { opacity: 0.6 }]}
+              disabled={isProcessing}
               onPress={onPurchase}
             >
               <LinearGradient
@@ -190,8 +189,14 @@ const PremiumPopup: React.FC<{
                 end={{ x: 1, y: 0 }}
                 style={popupStyles.purchaseGradient}
               >
-                <Ionicons name="flash" size={20} color={colors.text} />
-                <Text style={popupStyles.purchaseText}>Unlock Premium</Text>
+                {isProcessing ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="flash" size={20} color={colors.text} />
+                    <Text style={popupStyles.purchaseText}>Unlock Premium</Text>
+                  </>
+                )}
               </LinearGradient>
             </Pressable>
 
@@ -268,6 +273,9 @@ const DistanceSlider: React.FC<{
 const FilterModal: React.FC<{
   visible: boolean;
   onClose: () => void;
+  onApply: () => void;
+  loading: boolean;
+  error: string | null;
   ageRange: { min: number; max: number };
   setAgeRange: (range: { min: number; max: number }) => void;
   distance: number;
@@ -279,6 +287,9 @@ const FilterModal: React.FC<{
 }> = ({
   visible,
   onClose,
+  onApply,
+  loading,
+  error,
   ageRange,
   setAgeRange,
   distance,
@@ -288,6 +299,7 @@ const FilterModal: React.FC<{
   selectedInterests,
   setSelectedInterests,
 }) => {
+  const filterInsets = useSafeAreaInsets();
   const toggleInterest = (interest: string) => {
     if (selectedInterests.includes(interest)) {
       setSelectedInterests(selectedInterests.filter(i => i !== interest));
@@ -307,7 +319,7 @@ const FilterModal: React.FC<{
         <View style={filterStyles.container}>
           <LinearGradient
             colors={['#1a1a1a', '#0d0d0d']}
-            style={filterStyles.gradient}
+            style={[filterStyles.gradient, { paddingBottom: spacing.xl + filterInsets.bottom }]}
           >
             {/* Header */}
             <View style={filterStyles.header}>
@@ -444,16 +456,34 @@ const FilterModal: React.FC<{
               <View style={{ height: spacing.xl }} />
             </ScrollView>
 
+            {/* Error message */}
+            {error && (
+              <View style={filterStyles.errorContainer}>
+                <Ionicons name="alert-circle" size={20} color={colors.error} />
+                <Text style={filterStyles.errorText}>{error}</Text>
+              </View>
+            )}
+
             {/* Apply Button */}
-            <Pressable style={filterStyles.applyButton} onPress={onClose}>
+            <Pressable
+              style={[filterStyles.applyButton, loading && filterStyles.applyButtonDisabled]}
+              onPress={onApply}
+              disabled={loading}
+            >
               <LinearGradient
                 colors={[colors.primary, colors.primaryDark]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={filterStyles.applyGradient}
               >
-                <Ionicons name="checkmark" size={20} color={colors.text} />
-                <Text style={filterStyles.applyText}>Apply Filters</Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color={colors.text} />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={20} color={colors.text} />
+                    <Text style={filterStyles.applyText}>Apply Filters</Text>
+                  </>
+                )}
               </LinearGradient>
             </Pressable>
           </LinearGradient>
@@ -463,14 +493,22 @@ const FilterModal: React.FC<{
   );
 };
 
+// Shimmer Card Component for loading
+const ShimmerProfileCard: React.FC = () => (
+  <View style={[styles.shimmerCard, { width: CARD_WIDTH, height: CARD_HEIGHT }]}>
+    <View style={styles.shimmerContent} />
+  </View>
+);
+
 export const DiscoverScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { getAvailableProfiles, swipeProfile, undoLastSwipe } = useMatches();
+  const { getAvailableProfiles, swipeProfile, undoLastSwipe, fetchRecommendedUsers, isLoading, isPremium, refreshPremiumStatus, swipesRemaining, dailySwipeLimit, error: matchError, clearError } = useMatches();
+  const { user, updateDiscoveryFilters, error: contextError } = useUser();
 
   const [swipedCount, setSwipedCount] = useState(0);
-  const [totalSwipesToday, setTotalSwipesToday] = useState(0);
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
+  const [isPaymentProcessing, setIsPaymentProcessing] = useState(false);
+  const [monthlyPlan, setMonthlyPlan] = useState<SubscriptionPlan | null>(null);
 
   // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -478,22 +516,99 @@ export const DiscoverScreen: React.FC = () => {
   const [distance, setDistance] = useState(25);
   const [selectedGender, setSelectedGender] = useState('everyone');
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterError, setFilterError] = useState<string | null>(null);
+
+  // Fetch recommended users from API on mount
+  useEffect(() => {
+    console.log('[DiscoverScreen] Fetching recommended users on mount');
+    fetchRecommendedUsers(30); // Fetch 30 profiles initially
+  }, [fetchRecommendedUsers]);
+
+  // Fetch monthly plan for premium popup
+  useEffect(() => {
+    if (showPremiumPopup && !monthlyPlan) {
+      getPlans()
+        .then((plans) => {
+          const monthly = plans.find((p) => p.plan_key === 'monthly') || null;
+          setMonthlyPlan(monthly);
+        })
+        .catch((err) => console.error('[DiscoverScreen] Failed to fetch plans:', err));
+    }
+  }, [showPremiumPopup, monthlyPlan]);
+
+  // Sync filter state with user preferences when modal opens
+  useEffect(() => {
+    if (showFilterModal && user) {
+      // Load current preferences from user context
+      const currentAgeMin = user.preferences?.ageRange?.min || 18;
+      const currentAgeMax = user.preferences?.ageRange?.max || 35;
+      const currentDistance = user.preferences?.maxDistance || 25;
+      const currentGender = mapInterestedInToGender(user.interestedIn || []);
+
+      setAgeRange({ min: currentAgeMin, max: currentAgeMax });
+      setDistance(currentDistance);
+      setSelectedGender(currentGender);
+      setFilterError(null);
+    }
+  }, [showFilterModal, user]);
+
+  // Apply filters handler
+  const handleApplyFilters = useCallback(async () => {
+    setFilterLoading(true);
+    setFilterError(null);
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Update backend preferences
+    const success = await updateDiscoveryFilters(
+      ageRange.min,
+      ageRange.max,
+      distance,
+      selectedGender
+    );
+
+    setFilterLoading(false);
+
+    if (success) {
+      // Close modal
+      setShowFilterModal(false);
+
+      // Refresh discovery feed with new filters
+      // Backend will use updated preferences automatically
+      fetchRecommendedUsers(30);
+
+      // Show success feedback
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      // Show error
+      setFilterError(contextError || 'Failed to apply filters');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, [ageRange, distance, selectedGender, updateDiscoveryFilters, contextError, fetchRecommendedUsers]);
 
   const profiles = useMemo(() => getAvailableProfiles(), [getAvailableProfiles, swipedCount]);
-  const remainingFreeSwipes = FREE_SWIPE_LIMIT - totalSwipesToday;
+  const remainingFreeSwipes = swipesRemaining ?? 0;
 
-  const handleSwipe = useCallback((direction: SwipeDirection) => {
+  // Show premium popup when server reports swipe limit reached
+  useEffect(() => {
+    if (matchError === 'SWIPE_LIMIT_REACHED') {
+      setShowPremiumPopup(true);
+      clearError();
+    }
+  }, [matchError, clearError]);
+
+  const handleSwipe = useCallback(async (direction: SwipeDirection) => {
     if (profiles.length === 0) return;
 
-    // Check if user has reached the free limit
-    if (!isPremium && totalSwipesToday >= FREE_SWIPE_LIMIT) {
+    // Check if user has reached the free limit (server-enforced, local check for instant UX)
+    if (!isPremium && swipesRemaining !== null && swipesRemaining <= 0) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setShowPremiumPopup(true);
       return;
     }
 
     const currentProfile = profiles[0];
-    const match = swipeProfile(currentProfile.id, direction);
 
     Haptics.impactAsync(
       direction === 'up'
@@ -502,21 +617,25 @@ export const DiscoverScreen: React.FC = () => {
     );
 
     setSwipedCount(prev => prev + 1);
-    setTotalSwipesToday(prev => prev + 1);
 
-    // Show popup after reaching limit
-    if (!isPremium && totalSwipesToday + 1 >= FREE_SWIPE_LIMIT) {
-      setTimeout(() => {
-        setShowPremiumPopup(true);
-      }, 500);
-    }
+    // Swipe is now async — server enforces limit and returns updated remaining count
+    const match = await swipeProfile(currentProfile.id, direction);
 
     if (match) {
       setTimeout(() => {
         navigation.navigate('MatchScreen', { match });
       }, 400);
     }
-  }, [profiles, swipeProfile, navigation, totalSwipesToday, isPremium]);
+
+    // Show popup when swipes just ran out (swipesRemaining updated by context from response)
+    // This is handled via the useEffect watching matchError above
+
+    // Fetch more profiles when running low
+    if (profiles.length < 5) {
+      console.log('[DiscoverScreen] Running low on profiles, fetching more');
+      fetchRecommendedUsers(20);
+    }
+  }, [profiles, swipeProfile, navigation, swipesRemaining, isPremium, fetchRecommendedUsers]);
 
   const handleUndo = useCallback(() => {
     undoLastSwipe();
@@ -524,7 +643,13 @@ export const DiscoverScreen: React.FC = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [undoLastSwipe]);
 
-  const handleProfilePress = useCallback((profile: Profile) => {
+  const handleProfilePress = useCallback(async (profile: Profile) => {
+    // Track view (fire-and-forget)
+    trackProfileView(profile.id, 'discovery').catch(err => {
+      console.log('[DiscoverScreen] Profile view tracking failed (silent):', err);
+      // Don't block navigation or show error
+    });
+
     navigation.navigate('ProfileDetail', { profile });
   }, [navigation]);
 
@@ -543,23 +668,24 @@ export const DiscoverScreen: React.FC = () => {
   }, []);
 
   const handlePurchase = useCallback(() => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert(
-      'Payment',
-      'Redirecting to payment gateway...\n\nPremium Features:\n• Unlimited Likes\n• See who likes you\n• 5 Super Likes/day\n• Rewind last swipe\n• Priority in discover\n\nPrice: ₹99/month',
-      [
-        {
-          text: 'Pay ₹99',
-          onPress: () => {
-            setIsPremium(true);
-            setShowPremiumPopup(false);
-            Alert.alert('Success!', 'You are now a Premium member! Enjoy unlimited likes.');
-          }
-        },
-        { text: 'Cancel', style: 'cancel' }
-      ]
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsPaymentProcessing(true);
+    startPayment(
+      'monthly',
+      () => {
+        setIsPaymentProcessing(false);
+        setShowPremiumPopup(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Welcome to Premium!', 'Your subscription is now active. Enjoy unlimited likes!');
+        refreshPremiumStatus();
+      },
+      (message) => {
+        setIsPaymentProcessing(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Payment Failed', message);
+      }
     );
-  }, []);
+  }, [refreshPremiumStatus]);
 
   if (profiles.length === 0) {
     return (
@@ -598,7 +724,13 @@ export const DiscoverScreen: React.FC = () => {
               You've seen everyone in your area.{'\n'}
               Check back later for new matches!
             </Text>
-            <Pressable style={styles.refreshButton}>
+            <Pressable
+              style={styles.refreshButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                fetchRecommendedUsers(30);
+              }}
+            >
               <LinearGradient
                 colors={[colors.primary, colors.primaryDark]}
                 style={styles.refreshGradient}
@@ -609,6 +741,23 @@ export const DiscoverScreen: React.FC = () => {
             </Pressable>
           </Animated.View>
         </SafeAreaView>
+
+        {/* Filter Modal - must be outside SafeAreaView to render as overlay */}
+        <FilterModal
+          visible={showFilterModal}
+          onClose={() => setShowFilterModal(false)}
+          onApply={handleApplyFilters}
+          loading={filterLoading}
+          error={filterError}
+          ageRange={ageRange}
+          setAgeRange={setAgeRange}
+          distance={distance}
+          setDistance={setDistance}
+          selectedGender={selectedGender}
+          setSelectedGender={setSelectedGender}
+          selectedInterests={selectedInterests}
+          setSelectedInterests={setSelectedInterests}
+        />
       </View>
     );
   }
@@ -668,15 +817,36 @@ export const DiscoverScreen: React.FC = () => {
           {/* Ambient glow behind cards */}
           <View style={styles.ambientGlow} />
 
-          {profiles.slice(0, 3).reverse().map((profile, index) => (
-            <SwipeCard
-              key={profile.id}
-              profile={profile}
-              index={2 - index}
-              onSwipe={handleSwipe}
-              onPress={() => handleProfilePress(profile)}
-            />
-          ))}
+          {isLoading && profiles.length === 0 ? (
+            // Show shimmer when initially loading
+            Array.from({ length: 3 }).map((_, index) => (
+              <View
+                key={`shimmer-${index}`}
+                style={[
+                  styles.shimmerCardWrapper,
+                  {
+                    zIndex: index,
+                    transform: [
+                      { scale: 1 - index * 0.02 },
+                      { translateY: -index * 10 },
+                    ],
+                  },
+                ]}
+              >
+                <ShimmerProfileCard />
+              </View>
+            ))
+          ) : (
+            profiles.slice(0, 3).reverse().map((profile, index) => (
+              <SwipeCard
+                key={profile.id}
+                profile={profile}
+                index={2 - index}
+                onSwipe={handleSwipe}
+                onPress={() => handleProfilePress(profile)}
+              />
+            ))
+          )}
         </Animated.View>
 
         {/* Modern Action Buttons */}
@@ -743,13 +913,17 @@ export const DiscoverScreen: React.FC = () => {
         visible={showPremiumPopup}
         onClose={() => setShowPremiumPopup(false)}
         onPurchase={handlePurchase}
-        remainingSwipes={remainingFreeSwipes}
+        isProcessing={isPaymentProcessing}
+        plan={monthlyPlan}
       />
 
       {/* Filter Modal */}
       <FilterModal
         visible={showFilterModal}
         onClose={() => setShowFilterModal(false)}
+        onApply={handleApplyFilters}
+        loading={filterLoading}
+        error={filterError}
         ageRange={ageRange}
         setAgeRange={setAgeRange}
         distance={distance}
@@ -1156,6 +1330,19 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: fontWeight.semibold,
   },
+  // Shimmer styles
+  shimmerCardWrapper: {
+    position: 'absolute',
+  },
+  shimmerCard: {
+    borderRadius: borderRadius.xxl,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    overflow: 'hidden',
+  },
+  shimmerContent: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
 });
 
 const filterStyles = StyleSheet.create({
@@ -1377,5 +1564,23 @@ const filterStyles = StyleSheet.create({
     fontSize: fontSize.lg,
     fontWeight: fontWeight.bold,
     color: colors.text,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.error + '15',
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    borderRadius: borderRadius.md,
+    gap: spacing.sm,
+  },
+  errorText: {
+    fontSize: fontSize.sm,
+    color: colors.error,
+    flex: 1,
+  },
+  applyButtonDisabled: {
+    opacity: 0.5,
   },
 });

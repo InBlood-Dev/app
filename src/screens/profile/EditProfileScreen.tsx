@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -25,9 +26,8 @@ import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
-import { AnimatedButton, AnimatedInput, InterestChip } from '../../components';
+import { AnimatedButton, AnimatedInput } from '../../components';
 import { useUser } from '../../context';
-import { allInterests } from '../../data/interests';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -74,48 +74,19 @@ const SEXUAL_ORIENTATIONS = [
   'Aromantic', 'Graysexual', 'Fluid',
 ];
 
-const FETISH_TAGS = [
-  { id: 'dom', label: 'Dom', category: 'power' },
-  { id: 'sub', label: 'Sub', category: 'power' },
-  { id: 'switch', label: 'Switch', category: 'power' },
-  { id: 'bdsm', label: 'BDSM', category: 'kink' },
-  { id: 'kinky', label: 'Kinky', category: 'kink' },
-  { id: 'rope_play', label: 'Rope Play', category: 'kink' },
-  { id: 'shibari', label: 'Shibari', category: 'kink' },
-  { id: 'leather', label: 'Leather', category: 'kink' },
-  { id: 'latex', label: 'Latex', category: 'kink' },
-  { id: 'pup_play', label: 'Pup Play', category: 'roleplay' },
-  { id: 'pet_play', label: 'Pet Play', category: 'roleplay' },
-  { id: 'daddy', label: 'Daddy', category: 'roleplay' },
-  { id: 'mommy', label: 'Mommy', category: 'roleplay' },
-  { id: 'master', label: 'Master', category: 'power' },
-  { id: 'slave', label: 'Slave', category: 'power' },
-  { id: 'cuckold', label: 'Cuckold', category: 'group' },
-  { id: 'hotwife', label: 'Hotwife', category: 'group' },
-  { id: 'group_play', label: 'Group Play', category: 'group' },
-  { id: 'threesome', label: 'Threesome', category: 'group' },
-  { id: 'orgy', label: 'Orgy', category: 'group' },
-  { id: 'swinger', label: 'Swinger', category: 'group' },
-  { id: 'voyeur', label: 'Voyeur', category: 'exhibitionism' },
-  { id: 'exhibitionist', label: 'Exhibitionist', category: 'exhibitionism' },
-  { id: 'public_play', label: 'Public Play', category: 'exhibitionism' },
-  { id: 'sadist', label: 'Sadist', category: 'intensity' },
-  { id: 'masochist', label: 'Masochist', category: 'intensity' },
-  { id: 'primal', label: 'Primal', category: 'intensity' },
-  { id: 'degradation', label: 'Degradation', category: 'intensity' },
-  { id: 'praise', label: 'Praise Kink', category: 'intensity' },
-  { id: 'edging', label: 'Edging', category: 'sensual' },
-  { id: 'tantric', label: 'Tantric', category: 'sensual' },
-  { id: 'sensory', label: 'Sensory Play', category: 'sensual' },
-  { id: 'wax_play', label: 'Wax Play', category: 'sensual' },
-  { id: 'impact_play', label: 'Impact Play', category: 'intensity' },
-  { id: 'spanking', label: 'Spanking', category: 'intensity' },
-  { id: 'age_play', label: 'Age Play', category: 'roleplay' },
-  { id: 'breeding', label: 'Breeding', category: 'kink' },
-  { id: 'feet', label: 'Feet', category: 'kink' },
-  { id: 'lingerie', label: 'Lingerie', category: 'aesthetic' },
-  { id: 'crossdressing', label: 'Crossdressing', category: 'aesthetic' },
+const PRONOUNS = [
+  'He/Him',
+  'She/Her',
+  'They/Them',
+  'He/They',
+  'She/They',
+  'Ze/Hir',
+  'Xe/Xem',
+  'Any Pronouns',
+  'Prefer Not to Say',
 ];
+
+// Tags are now fetched from backend via availableTags
 
 const CONNECTED_APPS = [
   { id: 'spotify', name: 'Spotify', icon: 'musical-notes', color: '#1DB954', connected: false },
@@ -130,35 +101,127 @@ interface PromptAnswer {
 
 export const EditProfileScreen: React.FC = () => {
   const navigation = useNavigation();
-  const { user, updateUser } = useUser();
+  const {
+    user,
+    updateProfile,
+    uploadPhoto: uploadPhotoToBackend,
+    replacePhoto: replacePhotoInBackend,
+    deletePhoto: deletePhotoFromBackend,
+    setPrimaryPhoto: setPrimaryPhotoInBackend,
+    addTag: addTagToBackend,
+    removeTag: removeTagFromBackend,
+    updatePreferences,
+    availableTags,
+    fetchAvailableTags,
+    isLoading: contextLoading,
+    error: contextError,
+  } = useUser();
 
   // Form state initialized with user data
-  const [photos, setPhotos] = useState<string[]>(
-    user?.photos || ['https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=400&h=600&fit=crop']
-  );
+  const [photos, setPhotos] = useState<string[]>(user?.photos || []);
   const [bio, setBio] = useState(user?.bio || '');
-  const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [ageRange, setAgeRange] = useState(user?.preferences?.ageRange || { min: 21, max: 35 });
   const [maxDistance, setMaxDistance] = useState(user?.preferences?.maxDistance || 25);
-  const [showInterests, setShowInterests] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // New states for prompts and connected accounts
   const [promptAnswers, setPromptAnswers] = useState<PromptAnswer[]>([]);
   const [openingMoves, setOpeningMoves] = useState<PromptAnswer[]>([]);
-  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['English']);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(user?.languages || ['English']);
   const [connectedApps, setConnectedApps] = useState(CONNECTED_APPS);
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  // Photo options modal state
+  const [showPhotoOptions, setShowPhotoOptions] = useState(false);
+  const [photoOptionsIndex, setPhotoOptionsIndex] = useState(0);
 
   // Modal states
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [showOpeningMoveModal, setShowOpeningMoveModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [showOrientationModal, setShowOrientationModal] = useState(false);
+  const [showPronounsModal, setShowPronounsModal] = useState(false);
   const [showTagsModal, setShowTagsModal] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState<typeof PROFILE_PROMPTS[0] | null>(null);
   const [promptAnswer, setPromptAnswer] = useState('');
   const [selectedOrientation, setSelectedOrientation] = useState<string>(user?.orientation || '');
+  const [selectedPronouns, setSelectedPronouns] = useState<string>(user?.pronouns || '');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  // Sync local photos state with user context
+  React.useEffect(() => {
+    if (user?.photos) {
+      setPhotos(user.photos);
+    }
+  }, [user?.photos]);
+
+  // Sync selected tags: map user.tags (names) to tag_ids from availableTags
+  React.useEffect(() => {
+    if (user?.tags && availableTags.length > 0) {
+      const tagIds = user.tags
+        .map(tagName => {
+          const tag = availableTags.find(t => t.name.toLowerCase() === tagName.toLowerCase());
+          return tag?.tag_id;
+        })
+        .filter((id): id is string => id !== undefined);
+
+      setSelectedTags(tagIds);
+    }
+  }, [user?.tags, availableTags]);
+
+  // Initialize prompts from user data on mount
+  // Match to known constant IDs so modal checkmarks and dedup work correctly
+  React.useEffect(() => {
+    if (user?.prompts && user.prompts.length > 0) {
+      const prompts: PromptAnswer[] = user.prompts.map((prompt, index) => {
+        const matched = PROFILE_PROMPTS.find(
+          pp => pp.title.toLowerCase() === prompt.question.toLowerCase()
+        );
+        return {
+          promptId: matched?.id || `prompt_${index}`,
+          promptTitle: prompt.question,
+          answer: prompt.answer,
+        };
+      });
+      setPromptAnswers(prompts);
+    }
+  }, [user?.prompts]);
+
+  // Initialize opening moves from user data on mount
+  React.useEffect(() => {
+    if (user?.openingMoves && user.openingMoves.length > 0) {
+      const moves: PromptAnswer[] = user.openingMoves.map((move, index) => {
+        const matched = OPENING_MOVES.find(
+          om => om.title.toLowerCase() === move.question.toLowerCase()
+        );
+        return {
+          promptId: matched?.id || `move_${index}`,
+          promptTitle: move.question,
+          answer: move.answer,
+        };
+      });
+      setOpeningMoves(moves);
+    }
+  }, [user?.openingMoves]);
+
+  // Sync other user data fields with context
+  React.useEffect(() => {
+    if (user) {
+      if (user.bio) setBio(user.bio);
+      if (user.languages) setSelectedLanguages(user.languages);
+      if (user.orientation) setSelectedOrientation(user.orientation);
+      if (user.pronouns) setSelectedPronouns(user.pronouns);
+      if (user.preferences?.ageRange) setAgeRange(user.preferences.ageRange);
+      if (user.preferences?.maxDistance) setMaxDistance(user.preferences.maxDistance);
+    }
+  }, [user]);
+
+  // Load available tags on mount
+  React.useEffect(() => {
+    if (availableTags.length === 0) {
+      fetchAvailableTags();
+    }
+  }, [availableTags, fetchAvailableTags]);
 
   // Calculate profile strength
   const profileStrength = useMemo(() => {
@@ -173,11 +236,8 @@ export const EditProfileScreen: React.FC = () => {
     if (bio.length > 50) score += 5;
     if (bio.length > 100) score += 5;
 
-    // Interests (max 15 points - 1.5 per interest)
-    score += Math.min(interests.length * 1.5, 15);
-
-    // Profile prompts (max 15 points - 5 per prompt)
-    score += Math.min(promptAnswers.length * 5, 15);
+    // Profile prompts (max 20 points - 5 per prompt)
+    score += Math.min(promptAnswers.length * 5, 20);
 
     // Opening moves (max 10 points - 5 per move)
     score += Math.min(openingMoves.length * 5, 10);
@@ -190,7 +250,7 @@ export const EditProfileScreen: React.FC = () => {
     score += connectedApps.filter(app => app.connected).length * 5;
 
     return Math.min(Math.round(score), maxScore);
-  }, [photos, bio, interests, promptAnswers, openingMoves, selectedLanguages, connectedApps]);
+  }, [photos, bio, promptAnswers, openingMoves, selectedLanguages, connectedApps]);
 
   const getStrengthColor = (score: number) => {
     if (score < 30) return '#E53935';
@@ -206,7 +266,8 @@ export const EditProfileScreen: React.FC = () => {
     return 'All Star';
   };
 
-  const handlePickImage = useCallback(async (index: number) => {
+  // Add a new photo to an empty slot
+  const handleAddPhoto = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -217,33 +278,84 @@ export const EditProfileScreen: React.FC = () => {
 
     if (!result.canceled && result.assets[0]) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const newPhotos = [...photos];
-      if (index < newPhotos.length) {
-        newPhotos[index] = result.assets[0].uri;
+      setPhotoUploading(true);
+      const isPrimary = photos.length === 0;
+      const success = await uploadPhotoToBackend(result.assets[0].uri, isPrimary);
+      setPhotoUploading(false);
+
+      if (success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
-        newPhotos.push(result.assets[0].uri);
+        Alert.alert('Upload Failed', contextError || 'Failed to upload photo. Please try again.');
       }
-      setPhotos(newPhotos);
     }
-  }, [photos]);
+  }, [photos.length, uploadPhotoToBackend, contextError]);
 
-  const handleRemovePhoto = useCallback((index: number) => {
-    if (photos.length > 1) {
-      setPhotos(prev => prev.filter((_, i) => i !== index));
-    } else {
+  // Replace an existing photo (atomic: keeps position & primary status)
+  const handleReplacePhoto = useCallback(async (index: number) => {
+    const meta = user?.photoMeta?.[index];
+    if (!meta?.id) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      allowsMultipleSelection: false,
+      aspect: [3, 4],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setPhotoUploading(true);
+      const success = await replacePhotoInBackend(meta.id, result.assets[0].uri);
+      setPhotoUploading(false);
+
+      if (success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Replace Failed', contextError || 'Failed to replace photo. Please try again.');
+      }
+    }
+  }, [user?.photoMeta, replacePhotoInBackend, contextError]);
+
+  const handleRemovePhoto = useCallback(async (index: number) => {
+    if (photos.length <= 1) {
       Alert.alert('Error', 'You must have at least one photo');
+      return;
     }
-  }, [photos.length]);
 
-  const toggleInterest = useCallback((interest: string) => {
-    setInterests(prev =>
-      prev.includes(interest)
-        ? prev.filter(i => i !== interest)
-        : prev.length < 10
-        ? [...prev, interest]
-        : prev
-    );
-  }, []);
+    const meta = user?.photoMeta?.[index];
+    if (!meta?.id) {
+      // Fallback: only update local state if no photo ID available
+      setPhotos(prev => prev.filter((_, i) => i !== index));
+      return;
+    }
+
+    setPhotoUploading(true);
+    const success = await deletePhotoFromBackend(meta.id);
+    setPhotoUploading(false);
+
+    if (success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Alert.alert('Error', contextError || 'Failed to remove photo. Please try again.');
+    }
+  }, [photos.length, user?.photoMeta, deletePhotoFromBackend, contextError]);
+
+  const handleSetAsPrimary = useCallback(async (index: number) => {
+    const meta = user?.photoMeta?.[index];
+    if (!meta?.id) return;
+
+    setPhotoUploading(true);
+    const success = await setPrimaryPhotoInBackend(meta.id);
+    setPhotoUploading(false);
+
+    if (success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Alert.alert('Error', contextError || 'Failed to set profile photo. Please try again.');
+    }
+  }, [user?.photoMeta, setPrimaryPhotoInBackend, contextError]);
 
   const handleAddPrompt = (prompt: typeof PROFILE_PROMPTS[0], isOpeningMove: boolean = false) => {
     setSelectedPrompt(prompt);
@@ -295,13 +407,32 @@ export const EditProfileScreen: React.FC = () => {
     );
   };
 
-  const toggleTag = (tagId: string) => {
+  const toggleTag = async (tagId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const isCurrentlySelected = selectedTags.includes(tagId);
+
+    // Optimistic update
     setSelectedTags(prev =>
-      prev.includes(tagId)
+      isCurrentlySelected
         ? prev.filter(t => t !== tagId)
         : [...prev, tagId]
     );
+
+    // Update backend
+    const success = isCurrentlySelected
+      ? await removeTagFromBackend(tagId)
+      : await addTagToBackend(tagId);
+
+    if (!success) {
+      // Revert on failure
+      setSelectedTags(prev =>
+        isCurrentlySelected
+          ? [...prev, tagId]
+          : prev.filter(t => t !== tagId)
+      );
+      Alert.alert('Error', contextError || 'Failed to update tag. Please try again.');
+    }
   };
 
   const handleConnectApp = (appId: string) => {
@@ -317,22 +448,40 @@ export const EditProfileScreen: React.FC = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSaving(true);
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      // Update profile (bio, orientation, languages, prompts, opening moves)
+      const profileSuccess = await updateProfile({
+        bio,
+        orientation: selectedOrientation,
+        pronouns: selectedPronouns || undefined,
+        languages: selectedLanguages,
+        prompts: promptAnswers.map(p => ({ question: p.promptTitle, answer: p.answer })),
+        openingMoves: openingMoves.map(p => ({ question: p.promptTitle, answer: p.answer })),
+      });
 
-    updateUser({
-      photos,
-      bio,
-      interests,
-      orientation: selectedOrientation,
-      tags: selectedTags,
-      preferences: { ageRange, maxDistance },
-    });
+      // Update preferences (age range, max distance)
+      const prefsSuccess = await updatePreferences(
+        ageRange.min,
+        ageRange.max,
+        maxDistance,
+        user?.interestedIn
+      );
 
-    setSaving(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    navigation.goBack();
-  }, [photos, bio, interests, ageRange, maxDistance, selectedOrientation, selectedTags, updateUser, navigation]);
+      if (profileSuccess && prefsSuccess) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        navigation.goBack();
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Error', contextError || 'Failed to save changes. Please try again.');
+      }
+    } catch (err) {
+      console.error('[EditProfileScreen] Save error:', err);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [bio, ageRange, maxDistance, selectedOrientation, selectedPronouns, selectedLanguages, promptAnswers, openingMoves, updateProfile, updatePreferences, contextError, user?.interestedIn, navigation]);
 
   const renderPromptModal = (isOpeningMove: boolean = false) => (
     <Modal
@@ -509,25 +658,79 @@ export const EditProfileScreen: React.FC = () => {
     </Modal>
   );
 
-  const renderTagsModal = () => {
-    const groupedTags = FETISH_TAGS.reduce((acc, tag) => {
-      if (!acc[tag.category]) {
-        acc[tag.category] = [];
-      }
-      acc[tag.category].push(tag);
-      return acc;
-    }, {} as Record<string, typeof FETISH_TAGS>);
+  const renderPronounsModal = () => (
+    <Modal
+      visible={showPronounsModal}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setShowPronounsModal(false)}
+    >
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Pressable onPress={() => setShowPronounsModal(false)}>
+            <Ionicons name="close" size={28} color={colors.text} />
+          </Pressable>
+          <Text style={styles.modalTitle}>Pronouns</Text>
+          <Pressable onPress={() => setShowPronounsModal(false)}>
+            <Text style={styles.doneButton}>Done</Text>
+          </Pressable>
+        </View>
 
-    const categoryLabels: Record<string, string> = {
-      power: 'Power Dynamics',
-      kink: 'Kink & BDSM',
-      roleplay: 'Role Play',
-      group: 'Group Activities',
-      exhibitionism: 'Exhibitionism',
-      intensity: 'Intensity',
-      sensual: 'Sensual',
-      aesthetic: 'Aesthetic',
-    };
+        <ScrollView style={styles.orientationListContainer}>
+          {PRONOUNS.map(pronoun => (
+            <Pressable
+              key={pronoun}
+              style={[
+                styles.orientationOption,
+                selectedPronouns === pronoun && styles.orientationOptionSelected,
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setSelectedPronouns(pronoun);
+              }}
+            >
+              <View style={styles.orientationOptionContent}>
+                <View style={[
+                  styles.orientationIconBg,
+                  selectedPronouns === pronoun && styles.orientationIconBgSelected,
+                ]}>
+                  <Ionicons
+                    name="person"
+                    size={18}
+                    color={selectedPronouns === pronoun ? '#fff' : colors.primary}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.orientationOptionText,
+                    selectedPronouns === pronoun && styles.orientationOptionTextSelected,
+                  ]}
+                >
+                  {pronoun}
+                </Text>
+              </View>
+              {selectedPronouns === pronoun && (
+                <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
+              )}
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+
+  const renderTagsModal = () => {
+    // Group available tags by category
+    const groupedTags = availableTags.reduce((acc, tag) => {
+      const category = tag.category || 'Other';
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      acc[category].push(tag);
+      return acc;
+    }, {} as Record<string, typeof availableTags>);
+
+    const categories = Object.keys(groupedTags).sort();
 
     return (
       <Modal
@@ -548,28 +751,28 @@ export const EditProfileScreen: React.FC = () => {
           </View>
 
           <ScrollView style={styles.tagsListContainer}>
-            {Object.entries(groupedTags).map(([category, tags]) => (
+            {categories.map(category => (
               <View key={category} style={styles.tagsCategoryContainer}>
-                <Text style={styles.tagsCategoryTitle}>{categoryLabels[category] || category}</Text>
+                <Text style={styles.tagsCategoryTitle}>{category}</Text>
                 <View style={styles.tagsChipsContainer}>
-                  {tags.map(tag => (
+                  {groupedTags[category].map(tag => (
                     <Pressable
-                      key={tag.id}
+                      key={tag.tag_id}
                       style={[
                         styles.tagChip,
-                        selectedTags.includes(tag.id) && styles.tagChipSelected,
+                        selectedTags.includes(tag.tag_id) && styles.tagChipSelected,
                       ]}
-                      onPress={() => toggleTag(tag.id)}
+                      onPress={() => toggleTag(tag.tag_id)}
                     >
                       <Text
                         style={[
                           styles.tagChipText,
-                          selectedTags.includes(tag.id) && styles.tagChipTextSelected,
+                          selectedTags.includes(tag.tag_id) && styles.tagChipTextSelected,
                         ]}
                       >
-                        {tag.label}
+                        {tag.name}
                       </Text>
-                      {selectedTags.includes(tag.id) && (
+                      {selectedTags.includes(tag.tag_id) && (
                         <Ionicons name="checkmark-circle" size={16} color={colors.primary} style={{ marginLeft: 4 }} />
                       )}
                     </Pressable>
@@ -579,6 +782,85 @@ export const EditProfileScreen: React.FC = () => {
             ))}
           </ScrollView>
         </SafeAreaView>
+      </Modal>
+    );
+  };
+
+  const renderPhotoOptionsModal = () => {
+    const isProfilePhoto = photoOptionsIndex === 0;
+    const capturedIndex = photoOptionsIndex;
+
+    const closeAndDo = (action: () => void) => {
+      setShowPhotoOptions(false);
+      // Delay action until modal close animation completes (fixes Android picker bug)
+      setTimeout(action, 350);
+    };
+
+    return (
+      <Modal
+        visible={showPhotoOptions}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPhotoOptions(false)}
+      >
+        <View style={styles.photoModalOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setShowPhotoOptions(false)} />
+          <View style={styles.photoModalSheet}>
+            <View style={styles.photoModalHandle} />
+            <Text style={styles.photoModalTitle}>
+              {isProfilePhoto ? 'Profile Photo' : 'Photo Options'}
+            </Text>
+
+            {/* Replace — available for ALL photos */}
+            <Pressable
+              style={styles.photoModalOption}
+              onPress={() => closeAndDo(() => handleReplacePhoto(capturedIndex))}
+            >
+              <Ionicons name="camera-outline" size={22} color={colors.text} />
+              <Text style={styles.photoModalOptionText}>Replace Photo</Text>
+            </Pressable>
+
+            {/* Set as Profile Photo — only for non-profile photos */}
+            {!isProfilePhoto && (
+              <>
+                <View style={styles.photoModalDivider} />
+                <Pressable
+                  style={styles.photoModalOption}
+                  onPress={() => closeAndDo(() => handleSetAsPrimary(capturedIndex))}
+                >
+                  <Ionicons name="star-outline" size={22} color={colors.primary} />
+                  <Text style={[styles.photoModalOptionText, { color: colors.primary }]}>
+                    Set as Profile Photo
+                  </Text>
+                </Pressable>
+              </>
+            )}
+
+            {/* Remove — only for non-profile photos */}
+            {!isProfilePhoto && (
+              <>
+                <View style={styles.photoModalDivider} />
+                <Pressable
+                  style={styles.photoModalOption}
+                  onPress={() => closeAndDo(() => handleRemovePhoto(capturedIndex))}
+                >
+                  <Ionicons name="trash-outline" size={22} color="#FF3B30" />
+                  <Text style={[styles.photoModalOptionText, { color: '#FF3B30' }]}>
+                    Remove Photo
+                  </Text>
+                </Pressable>
+              </>
+            )}
+
+            <View style={styles.photoModalDivider} />
+            <Pressable
+              style={styles.photoModalCancel}
+              onPress={() => setShowPhotoOptions(false)}
+            >
+              <Text style={styles.photoModalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
     );
   };
@@ -649,8 +931,15 @@ export const EditProfileScreen: React.FC = () => {
 
           {/* Photos Section */}
           <Animated.View entering={FadeInUp.delay(100)} style={styles.section}>
-            <Text style={styles.sectionTitle}>Photos</Text>
-            <Text style={styles.sectionSubtitle}>Add up to 6 photos</Text>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Photos</Text>
+                <Text style={styles.sectionSubtitle}>Add up to 6 photos</Text>
+              </View>
+              {photoUploading && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
+            </View>
 
             <View style={styles.photosGrid}>
               {[...Array(6)].map((_, index) => (
@@ -659,17 +948,10 @@ export const EditProfileScreen: React.FC = () => {
                   style={[styles.photoSlot, index === 0 && styles.photoSlotMain]}
                   onPress={() => {
                     if (photos[index]) {
-                      Alert.alert(
-                        'Photo Options',
-                        'What would you like to do?',
-                        [
-                          { text: 'Replace', onPress: () => handlePickImage(index) },
-                          { text: 'Remove', style: 'destructive', onPress: () => handleRemovePhoto(index) },
-                          { text: 'Cancel', style: 'cancel' },
-                        ]
-                      );
+                      setPhotoOptionsIndex(index);
+                      setShowPhotoOptions(true);
                     } else if (index <= photos.length) {
-                      handlePickImage(index);
+                      handleAddPhoto();
                     }
                   }}
                 >
@@ -742,6 +1024,44 @@ export const EditProfileScreen: React.FC = () => {
               >
                 <Ionicons name="heart-circle-outline" size={32} color="#FF9800" />
                 <Text style={styles.emptyOrientationText}>Select your sexual orientation</Text>
+              </Pressable>
+            )}
+          </Animated.View>
+
+          {/* Pronouns Section */}
+          <Animated.View entering={FadeInUp.delay(185)} style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Pronouns</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {selectedPronouns || 'Not selected'}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.expandButton}
+                onPress={() => setShowPronounsModal(true)}
+              >
+                <Text style={styles.expandButtonText}>
+                  {selectedPronouns ? 'Change' : 'Select'}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+              </Pressable>
+            </View>
+
+            {selectedPronouns ? (
+              <View style={styles.orientationChipContainer}>
+                <View style={styles.selectedOrientationChip}>
+                  <Ionicons name="person" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.selectedOrientationText}>{selectedPronouns}</Text>
+                </View>
+              </View>
+            ) : (
+              <Pressable
+                style={styles.emptyOrientationCard}
+                onPress={() => setShowPronounsModal(true)}
+              >
+                <Ionicons name="person-circle-outline" size={32} color={colors.primary} />
+                <Text style={styles.emptyOrientationText}>Select your pronouns</Text>
               </Pressable>
             )}
           </Animated.View>
@@ -899,10 +1219,10 @@ export const EditProfileScreen: React.FC = () => {
             {selectedTags.length > 0 ? (
               <View style={styles.tagsChipsContainer}>
                 {selectedTags.map(tagId => {
-                  const tag = FETISH_TAGS.find(t => t.id === tagId);
+                  const tag = availableTags.find(t => t.tag_id === tagId);
                   return tag ? (
                     <View key={tagId} style={styles.selectedTagChip}>
-                      <Text style={styles.selectedTagText}>{tag.label}</Text>
+                      <Text style={styles.selectedTagText}>{tag.name}</Text>
                     </View>
                   ) : null;
                 })}
@@ -918,52 +1238,8 @@ export const EditProfileScreen: React.FC = () => {
             )}
           </Animated.View>
 
-          {/* Interests Section */}
-          <Animated.View entering={FadeInUp.delay(350)} style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Interests</Text>
-                <Text style={styles.sectionSubtitle}>
-                  {interests.length}/10 selected
-                </Text>
-              </View>
-              <Pressable
-                style={styles.expandButton}
-                onPress={() => setShowInterests(!showInterests)}
-              >
-                <Text style={styles.expandButtonText}>
-                  {showInterests ? 'Show Less' : 'Edit'}
-                </Text>
-                <Ionicons
-                  name={showInterests ? 'chevron-up' : 'chevron-down'}
-                  size={18}
-                  color={colors.primary}
-                />
-              </Pressable>
-            </View>
-
-            {showInterests ? (
-              <View style={styles.interestsContainer}>
-                {allInterests.map(interest => (
-                  <InterestChip
-                    key={interest}
-                    label={interest}
-                    selected={interests.includes(interest)}
-                    onPress={() => toggleInterest(interest)}
-                  />
-                ))}
-              </View>
-            ) : (
-              <View style={styles.interestsContainer}>
-                {interests.map(interest => (
-                  <InterestChip key={interest} label={interest} disabled />
-                ))}
-              </View>
-            )}
-          </Animated.View>
-
           {/* Connect Accounts Section */}
-          <Animated.View entering={FadeInUp.delay(400)} style={styles.section}>
+          {/* <Animated.View entering={FadeInUp.delay(400)} style={styles.section}>
             <Text style={styles.sectionTitle}>Connect Accounts</Text>
             <Text style={styles.sectionSubtitle}>
               Show your personality through your favorite apps
@@ -1017,7 +1293,7 @@ export const EditProfileScreen: React.FC = () => {
                 </ScrollView>
               </View>
             )}
-          </Animated.View>
+          </Animated.View> */}
 
           {/* Preferences Section */}
           <Animated.View entering={FadeInUp.delay(450)} style={styles.section}>
@@ -1080,10 +1356,12 @@ export const EditProfileScreen: React.FC = () => {
       </SafeAreaView>
 
       {/* Modals */}
+      {renderPhotoOptionsModal()}
       {renderPromptModal(false)}
       {renderPromptModal(true)}
       {renderLanguageModal()}
       {renderOrientationModal()}
+      {renderPronounsModal()}
       {renderTagsModal()}
     </View>
   );
@@ -1360,10 +1638,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.primary,
     fontWeight: fontWeight.medium,
-  },
-  interestsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   // Connected Accounts Styles
   connectedAppsContainer: {
@@ -1737,5 +2011,59 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: spacing.md,
     textAlign: 'center',
+  },
+  // Photo Options Modal Styles
+  photoModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  photoModalSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  photoModalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  photoModalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  photoModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  photoModalOptionText: {
+    fontSize: fontSize.md,
+    color: colors.text,
+  },
+  photoModalDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+  photoModalCancel: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  photoModalCancelText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
   },
 });

@@ -10,6 +10,7 @@ import {
   Image,
   Alert,
   Dimensions,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -29,19 +30,20 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { AnimatedButton } from '../../components';
-import { useAuth } from '../../context';
+import { useAuth, useLocation } from '../../context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
+import { TermsModal } from '../../components/modals/TermsModal';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Couple images for the background slideshow - Indian couples
 const COUPLE_IMAGES = [
-  'https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=800&h=1200&fit=crop', // Indian couple
-  'https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=800&h=1200&fit=crop', // Indian wedding
-  'https://images.unsplash.com/photo-1604017011826-d3b4c23f8914?w=800&h=1200&fit=crop', // Indian couple
-  'https://images.unsplash.com/photo-1519741497674-611481863552?w=800&h=1200&fit=crop', // Couple silhouette
-  'https://images.unsplash.com/photo-1529634806980-85c3dd6d34ac?w=800&h=1200&fit=crop', // Couple
+  'https://images.pexels.com/photos/6544197/pexels-photo-6544197.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Indian couple in traditional clothing
+  'https://images.pexels.com/photos/19733687/pexels-photo-19733687.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Indian wedding couple portrait
+  'https://images.pexels.com/photos/18362003/pexels-photo-18362003.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Hindu groom kissing bride
+  'https://images.pexels.com/photos/30155180/pexels-photo-30155180.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Romantic Indian couple embracing
+  'https://images.pexels.com/photos/20610664/pexels-photo-20610664.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Happy Indian newlyweds
 ];
 
 type AuthStackParamList = {
@@ -130,6 +132,9 @@ export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const { googleLogin, isLoading } = useAuth();
   const { signIn, isConfigured, isSigningIn } = useGoogleAuth();
+  const { userLocation } = useLocation();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   const logoScale = useSharedValue(1);
 
@@ -150,14 +155,34 @@ export const LoginScreen: React.FC = () => {
   }));
 
   const handleGoogleLogin = useCallback(async () => {
+    // Prevent multiple taps
+    if (isProcessing || isLoading || isSigningIn) {
+      console.log('[LoginScreen] Already processing, ignoring tap');
+      return;
+    }
+
     console.log('[LoginScreen] handleGoogleLogin called');
+    setIsProcessing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      console.log('[LoginScreen] Step 1: Calling Google signIn');
+      // Step 1: Use cached location from LocationContext (if available)
+      let location: { latitude: number; longitude: number } | undefined;
+      if (userLocation?.latitude && userLocation?.longitude) {
+        location = {
+          latitude: userLocation.latitude,
+          longitude: userLocation.longitude,
+        };
+        console.log('[LoginScreen] Step 1: Using cached location:', location.latitude, location.longitude);
+      } else {
+        console.log('[LoginScreen] Step 1: No cached location available');
+      }
+
+      // Step 2: Sign in with Google
+      console.log('[LoginScreen] Step 2: Calling Google signIn');
       const result = await signIn();
 
-      console.log('[LoginScreen] Step 2: Google signIn result:', result ? 'success' : 'null/cancelled');
+      console.log('[LoginScreen] Step 3: Google signIn result:', result ? 'success' : 'null/cancelled');
 
       if (result) {
         console.log('[LoginScreen] User info from Google:');
@@ -165,11 +190,14 @@ export const LoginScreen: React.FC = () => {
         console.log('[LoginScreen]   - Email:', result.user.email);
         console.log('[LoginScreen]   - Name:', result.user.name);
 
-        // Pass auth data (user + access token) to auth context
-        console.log('[LoginScreen] Step 3: Calling googleLogin with auth data');
-        const success = await googleLogin(result);
+        // Add location to result if available
+        const authDataWithLocation = location ? { ...result, location } : result;
 
-        console.log('[LoginScreen] Step 4: googleLogin result:', success ? 'success' : 'failed');
+        // Pass auth data (user + access token + location) to auth context
+        console.log('[LoginScreen] Step 4: Calling googleLogin with auth data', location ? '(with location)' : '(without location)');
+        const success = await googleLogin(authDataWithLocation);
+
+        console.log('[LoginScreen] Step 5: googleLogin result:', success ? 'success' : 'failed');
 
         if (!success) {
           console.log('[LoginScreen] Login failed - showing alert');
@@ -194,8 +222,15 @@ export const LoginScreen: React.FC = () => {
         'An unexpected error occurred. Please try again.',
         [{ text: 'OK' }]
       );
+    } finally {
+      setIsProcessing(false);
     }
-  }, [signIn, googleLogin]);
+  }, [signIn, googleLogin, userLocation, isProcessing, isLoading, isSigningIn]);
+
+  const handleDisagreeTerms = useCallback(() => {
+    setShowTermsModal(false);
+    BackHandler.exitApp();
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -248,8 +283,8 @@ export const LoginScreen: React.FC = () => {
               <AnimatedButton
                 title="Continue with Google"
                 onPress={handleGoogleLogin}
-                loading={isLoading || isSigningIn}
-                disabled={!isConfigured || isSigningIn}
+                loading={isProcessing || isLoading || isSigningIn}
+                disabled={!isConfigured || isProcessing || isSigningIn}
                 fullWidth
                 size="large"
                 icon={<Ionicons name="logo-google" size={24} color={colors.text} />}
@@ -263,20 +298,30 @@ export const LoginScreen: React.FC = () => {
                   Your data is secure and will never be shared without your permission
                 </Text>
               </View>
-            </Animated.View>
 
-            {/* Terms */}
-            <Animated.View entering={FadeIn.delay(800)} style={styles.termsContainer}>
-              <Text style={styles.termsText}>
-                By continuing, you agree to our{' '}
-                <Text style={styles.termsLink}>Terms of Service</Text>
-                {' '}and{' '}
-                <Text style={styles.termsLink}>Privacy Policy</Text>
-              </Text>
+              {/* Terms Agreement */}
+              <View style={styles.termsCheckRow}>
+                <Ionicons name="checkbox" size={22} color={colors.primary} />
+                <Text style={styles.termsCheckText}>
+                  I agree with{' '}
+                  <Text
+                    style={styles.termsHighlight}
+                    onPress={() => setShowTermsModal(true)}
+                  >
+                    Terms & Conditions
+                  </Text>
+                </Text>
+              </View>
             </Animated.View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <TermsModal
+        visible={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+        onDisagree={handleDisagreeTerms}
+      />
     </View>
   );
 };
@@ -415,18 +460,21 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     lineHeight: 18,
   },
-  termsContainer: {
+  termsCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     marginTop: spacing.lg,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
-  termsText: {
-    fontSize: fontSize.xs,
+  termsCheckText: {
+    flex: 1,
+    fontSize: fontSize.sm,
     color: colors.textMuted,
-    textAlign: 'center',
     lineHeight: 18,
   },
-  termsLink: {
-    color: colors.textSecondary,
-    textDecorationLine: 'underline',
+  termsHighlight: {
+    color: colors.primary,
+    fontWeight: fontWeight.semibold,
   },
 });

@@ -8,3 +8,6 @@ export { ActionButton } from './ActionButton';
 export { FloatingHearts } from './FloatingHearts';
 export { ChatBubble, TypingIndicator } from './ChatBubble';
 export { MatchCard, NewMatchBubble } from './MatchCard';
+export { NotificationPermissionModal } from './modals/NotificationPermissionModal';
+export { MatchToast } from './MatchToast';
+export { OpeningMoveCard } from './OpeningMoveCard';

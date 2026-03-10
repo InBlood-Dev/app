@@ -66,6 +66,21 @@ const allInterests = [
   'Meditation', 'Poetry', 'Stand-up Comedy', 'Startups', 'Gaming',
 ];
 
+const allTags = [
+  'Foodie', 'Adventurous', 'Creative', 'Ambitious', 'Easy-going',
+  'Outgoing', 'Thoughtful', 'Spontaneous', 'Intellectual', 'Fun-loving',
+  'Romantic', 'Athletic', 'Artistic', 'Nerdy', 'Spiritual',
+];
+
+const relationshipTypes = [
+  { type: 'Friendship', border_color: '#FFD700' },
+  { type: 'Casual', border_color: '#FF6347' },
+  { type: 'Dating', border_color: '#FF69B4' },
+  { type: 'Serious', border_color: '#9370DB' },
+  { type: 'Open', border_color: '#32CD32' },
+  { type: 'Flexible', border_color: '#A9A9A9' },
+];
+
 const cities = [
   'Mumbai', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai',
   'Kolkata', 'Pune', 'Ahmedabad', 'Jaipur', 'Lucknow',
@@ -118,11 +133,13 @@ export const generateMockProfiles = (count: number = 20): Profile[] => {
       id: `profile-${i + 1}`,
       name,
       age: getRandomInt(22, 32),
-      gender: isFemale ? 'female' : 'male',
-      interestedIn: isFemale ? ['male'] : ['female'],
+      gender: isFemale ? 'Woman' : 'Man',
+      interestedIn: isFemale ? ['Man'] : ['Woman'],
       photos,
       bio: bios[i % bios.length],
       interests: getRandomItems(allInterests, getRandomInt(4, 6)),
+      tags: getRandomItems(allTags, getRandomInt(3, 5)),
+      relationshipTypes: getRandomItems(relationshipTypes, getRandomInt(1, 2)),
       location: {
         city: cities[i % cities.length],
         distance: getRandomInt(1, 20),

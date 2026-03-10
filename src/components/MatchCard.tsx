@@ -9,6 +9,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { Match } from '../types';
 import { colors, borderRadius, fontSize, fontWeight, spacing, shadows } from '../theme';
+import { isUserOnline } from '../utils/timeUtils';
 
 interface MatchCardProps {
   match: Match;
@@ -20,6 +21,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress, index = 0 }) => {
   const scale = useSharedValue(1);
+  const online = isUserOnline(match.profile.lastActive);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -57,10 +59,13 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress, index = 0 
       onPress={handlePress}
       style={[styles.container, shadows.sm, animatedStyle]}
     >
-      <Image
-        source={{ uri: match.profile.photos[0] }}
-        style={styles.avatar}
-      />
+      <View style={styles.avatarContainer}>
+        <Image
+          source={{ uri: match.profile.photos[0] }}
+          style={styles.avatar}
+        />
+        {online && <View style={styles.avatarOnlineDot} />}
+      </View>
 
       <View style={styles.content}>
         <View style={styles.header}>
@@ -98,6 +103,7 @@ export const NewMatchBubble: React.FC<{ match: Match; onPress: () => void }> = (
   onPress,
 }) => {
   const scale = useSharedValue(1);
+  const online = isUserOnline(match.profile.lastActive);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -123,7 +129,7 @@ export const NewMatchBubble: React.FC<{ match: Match; onPress: () => void }> = (
           source={{ uri: match.profile.photos[0] }}
           style={styles.bubbleImage}
         />
-        <View style={styles.onlineDot} />
+        {online && <View style={styles.onlineDot} />}
       </View>
       <Text style={styles.bubbleName} numberOfLines={1}>
         {match.profile.name}
@@ -141,11 +147,25 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: spacing.md,
+  },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: borderRadius.full,
-    marginRight: spacing.md,
+  },
+  avatarOnlineDot: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.success,
+    borderWidth: 2,
+    borderColor: colors.card,
   },
   content: {
     flex: 1,

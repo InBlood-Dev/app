@@ -14,7 +14,18 @@
       "Read(//Users/moon/Library/Android/sdk/**)",
       "Bash(keytool -list:*)",
       "Bash(git remote add:*)",
-      "Bash(git remote set-url:*)"
+      "Bash(git remote set-url:*)",
+      "Bash(gradlew.bat:*)",
+      "Bash(bash gradlew:*)",
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "WebFetch(domain:unsplash.com)",
+      "WebFetch(domain:api.unsplash.com)",
+      "WebFetch(domain:www.pexels.com)",
+      "WebFetch(domain:images.pexels.com)"
+    ],
+    "additionalDirectories": [
+      "e:\\Android\\Projects\\Inblood\\newnew"
     ]
   }
 }

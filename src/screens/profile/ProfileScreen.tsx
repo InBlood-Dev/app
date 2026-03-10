@@ -11,8 +11,10 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInUp,
@@ -33,9 +35,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
+import Constants from 'expo-constants';
 import { useUser, useMatches, useAuth } from '../../context';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { startPayment, getPlans, getSubscriptionStatus, cancelSubscription } from '../../services/payment.service';
+import { SafetyModal } from '../../components/modals/SafetyModal';
+import type { PlanType, SubscriptionPlan, SubscriptionStatusResponse } from '../../types';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -56,65 +62,6 @@ type RootStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-// Subscription Plan Type
-interface SubscriptionPlan {
-  name: string;
-  price: number;
-  period: string;
-  color: string;
-  badge?: string;
-  features: Array<{ text: string; included: boolean }>;
-}
-
-// Subscription Plans Data
-const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
-  normal: {
-    name: 'Basic',
-    price: 0,
-    period: 'Free',
-    color: colors.textMuted,
-    features: [
-      { text: '10 likes per day', included: true },
-      { text: 'See who liked you', included: false },
-      { text: 'Unlimited rewinds', included: false },
-      { text: 'Super Likes', included: false },
-      { text: 'Boost profile', included: false },
-      { text: 'Ad-free experience', included: false },
-    ],
-  },
-  premium: {
-    name: 'Premium',
-    price: 99,
-    period: '/month',
-    color: colors.primary,
-    badge: 'POPULAR',
-    features: [
-      { text: 'Unlimited likes', included: true },
-      { text: 'See who liked you', included: true },
-      { text: '5 rewinds per day', included: true },
-      { text: '3 Super Likes per day', included: true },
-      { text: '1 Boost per month', included: true },
-      { text: 'Ad-free experience', included: false },
-    ],
-  },
-  premiumPlus: {
-    name: 'Premium+',
-    price: 199,
-    period: '/month',
-    color: '#FFD700',
-    badge: 'BEST VALUE',
-    features: [
-      { text: 'Unlimited likes', included: true },
-      { text: 'See who liked you', included: true },
-      { text: 'Unlimited rewinds', included: true },
-      { text: 'Unlimited Super Likes', included: true },
-      { text: '5 Boosts per month', included: true },
-      { text: 'Ad-free experience', included: true },
-      { text: 'Priority support', included: true },
-      { text: 'Verified badge', included: true },
-    ],
-  },
-};
 
 // Simple Red Border Component (non-animated)
 const RedBorder: React.FC<{
@@ -157,9 +104,12 @@ const RedBorder: React.FC<{
 const PlanDetailsModal: React.FC<{
   visible: boolean;
   onClose: () => void;
+  plans: SubscriptionPlan[];
   selectedPlan: string | null;
   onSelectPlan: (plan: string) => void;
-}> = ({ visible, onClose, selectedPlan, onSelectPlan }) => {
+  onPaymentSuccess: () => void;
+}> = ({ visible, onClose, plans, selectedPlan, onSelectPlan, onPaymentSuccess }) => {
+  const [isProcessing, setIsProcessing] = useState(false);
   return (
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
       <View style={modalStyles.overlay}>
@@ -173,70 +123,91 @@ const PlanDetailsModal: React.FC<{
             <Text style={modalStyles.subtitle}>Unlock the full InBlood experience</Text>
 
             <ScrollView showsVerticalScrollIndicator={false} style={modalStyles.plansScroll}>
-              {Object.entries(SUBSCRIPTION_PLANS).map(([key, plan]) => (
-                <Pressable
-                  key={key}
-                  style={[
-                    modalStyles.planCard,
-                    selectedPlan === key && modalStyles.planCardSelected,
-                    { borderColor: plan.color },
-                  ]}
-                  onPress={() => onSelectPlan(key)}
-                >
-                  {plan.badge && (
-                    <View style={[modalStyles.planBadge, { backgroundColor: plan.color }]}>
-                      <Text style={modalStyles.planBadgeText}>{plan.badge}</Text>
-                    </View>
-                  )}
-
-                  <View style={modalStyles.planHeader}>
-                    <Text style={[modalStyles.planName, { color: plan.color }]}>{plan.name}</Text>
-                    <View style={modalStyles.priceRow}>
-                      {plan.price > 0 && <Text style={modalStyles.currency}>₹</Text>}
-                      <Text style={modalStyles.planPrice}>
-                        {plan.price === 0 ? 'Free' : plan.price}
-                      </Text>
-                      {plan.price > 0 && <Text style={modalStyles.planPeriod}>{plan.period}</Text>}
-                    </View>
-                  </View>
-
-                  <View style={modalStyles.featuresList}>
-                    {plan.features.map((feature, index) => (
-                      <View key={index} style={modalStyles.featureItem}>
-                        <Ionicons
-                          name={feature.included ? 'checkmark-circle' : 'close-circle'}
-                          size={18}
-                          color={feature.included ? '#4CAF50' : colors.textMuted}
-                        />
-                        <Text
-                          style={[
-                            modalStyles.featureText,
-                            !feature.included && modalStyles.featureTextDisabled,
-                          ]}
-                        >
-                          {feature.text}
-                        </Text>
+              {plans.map((plan) => {
+                const planColor = plan.badge_color || colors.primary;
+                const isSelected = selectedPlan === plan.plan_key;
+                return (
+                  <Pressable
+                    key={plan.plan_key}
+                    style={[
+                      modalStyles.planCard,
+                      isSelected && modalStyles.planCardSelected,
+                      { borderColor: isSelected ? planColor : 'rgba(255,255,255,0.12)' },
+                    ]}
+                    onPress={() => onSelectPlan(plan.plan_key)}
+                  >
+                    {plan.badge && (
+                      <View style={[modalStyles.planBadge, { backgroundColor: planColor }]}>
+                        <Text style={modalStyles.planBadgeText}>{plan.badge}</Text>
                       </View>
-                    ))}
-                  </View>
+                    )}
 
-                  {selectedPlan === key && (
-                    <View style={modalStyles.selectedIndicator}>
-                      <Ionicons name="checkmark-circle" size={24} color={plan.color} />
+                    <View style={modalStyles.planHeader}>
+                      <View style={modalStyles.planNameRow}>
+                        <Text style={[modalStyles.planName, { color: planColor }]}>{plan.name}</Text>
+                        <Ionicons
+                          name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                          size={22}
+                          color={isSelected ? planColor : 'rgba(255,255,255,0.2)'}
+                        />
+                      </View>
+                      <View style={modalStyles.priceRow}>
+                        <Text style={modalStyles.currency}>₹</Text>
+                        <Text style={modalStyles.planPrice}>{plan.price.toLocaleString('en-IN')}</Text>
+                        <Text style={modalStyles.planPeriod}>{plan.period_label}</Text>
+                        {plan.original_price && (
+                          <Text style={modalStyles.originalPrice}>
+                            ₹{plan.original_price.toLocaleString('en-IN')}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                  )}
-                </Pressable>
-              ))}
+
+                    <View style={modalStyles.featuresList}>
+                      {plan.features.map((feature, index) => (
+                        <View key={index} style={modalStyles.featureItem}>
+                          <Ionicons
+                            name={feature.included ? 'checkmark-circle' : 'close-circle'}
+                            size={16}
+                            color={feature.included ? '#4CAF50' : 'rgba(255,255,255,0.2)'}
+                          />
+                          <Text
+                            style={[
+                              modalStyles.featureText,
+                              !feature.included && modalStyles.featureTextDisabled,
+                            ]}
+                          >
+                            {feature.text}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
 
             <Pressable
-              style={modalStyles.subscribeButton}
+              style={[modalStyles.subscribeButton, isProcessing && { opacity: 0.6 }]}
+              disabled={isProcessing || !selectedPlan}
               onPress={() => {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Alert.alert(
-                  'Subscribe',
-                  `You selected ${SUBSCRIPTION_PLANS[selectedPlan as keyof typeof SUBSCRIPTION_PLANS]?.name}. Redirecting to payment...`,
-                  [{ text: 'OK', onPress: onClose }]
+                if (!selectedPlan) return;
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setIsProcessing(true);
+                startPayment(
+                  selectedPlan as PlanType,
+                  () => {
+                    setIsProcessing(false);
+                    onClose();
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    Alert.alert('Welcome to Premium!', 'Your subscription is now active.');
+                    onPaymentSuccess();
+                  },
+                  (message) => {
+                    setIsProcessing(false);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                    Alert.alert('Payment Failed', message);
+                  }
                 );
               }}
             >
@@ -244,7 +215,11 @@ const PlanDetailsModal: React.FC<{
                 colors={[colors.primary, colors.primaryDark]}
                 style={modalStyles.subscribeGradient}
               >
-                <Text style={modalStyles.subscribeText}>Subscribe Now</Text>
+                {isProcessing ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={modalStyles.subscribeText}>Subscribe Now</Text>
+                )}
               </LinearGradient>
             </Pressable>
           </LinearGradient>
@@ -488,14 +463,81 @@ const BentoBox: React.FC<{
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { user } = useUser();
-  const { matches } = useMatches();
+  const { user, isLoading, refreshProfile, isRefreshing, error, clearError } = useUser();
+  const { matches, refreshPremiumStatus } = useMatches();
   const { logout } = useAuth();
   const { signOut: googleSignOut } = useGoogleAuth();
+  const insets = useSafeAreaInsets();
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<string>('premium');
+  const [selectedPlan, setSelectedPlan] = useState<string>('monthly');
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionStatusResponse | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+
+  // Auto-recover: if profile fetch failed, retry once automatically
+  const hasAutoRetried = useRef(false);
+  useEffect(() => {
+    if (error && !user && !isLoading && !isRefreshing && !hasAutoRetried.current) {
+      hasAutoRetried.current = true;
+      console.log('[ProfileScreen] Auto-retrying profile fetch after error');
+      clearError();
+      refreshProfile();
+    }
+  }, [error, user, isLoading, isRefreshing, clearError, refreshProfile]);
+
+  // Fetch subscription status
+  const fetchSubscriptionInfo = useCallback(async () => {
+    try {
+      const status = await getSubscriptionStatus();
+      setSubscriptionInfo(status);
+    } catch (err) {
+      console.error('[ProfileScreen] Failed to fetch subscription status:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSubscriptionInfo();
+  }, [fetchSubscriptionInfo]);
+
+  const handleCancelSubscription = useCallback(() => {
+    Alert.alert(
+      'Cancel Subscription',
+      'Your premium features will remain active until the expiry date. Are you sure?',
+      [
+        { text: 'Keep Subscription', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            setIsCancelling(true);
+            try {
+              await cancelSubscription();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert('Subscription Cancelled', 'Your premium access will continue until the expiry date.');
+              fetchSubscriptionInfo();
+              refreshPremiumStatus();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to cancel subscription');
+            } finally {
+              setIsCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [fetchSubscriptionInfo, refreshPremiumStatus]);
+
+  // Fetch plans when modal opens
+  useEffect(() => {
+    if (showPlanModal && plans.length === 0) {
+      getPlans()
+        .then(setPlans)
+        .catch((err) => console.error('[ProfileScreen] Failed to fetch plans:', err));
+    }
+  }, [showPlanModal, plans.length]);
 
   const handleEditProfile = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -536,47 +578,68 @@ export const ProfileScreen: React.FC = () => {
     );
   }, [logout, googleSignOut]);
 
-  const displayUser = user || {
-    name: 'Arjun',
-    age: 25,
-    photos: [
-      'https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=400&h=600&fit=crop',
-      'https://images.unsplash.com/photo-1615109398623-88346a601842?w=400&h=600&fit=crop',
-      'https://images.unsplash.com/photo-1583195764036-6dc248ac07d9?w=400&h=600&fit=crop',
-      'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=600&fit=crop',
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop',
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=600&fit=crop',
-    ],
-    bio: 'Chai lover | Adventure seeker | Dog parent\n\nLooking for someone to explore new cafes and travel India with.',
-    interests: ['Travel', 'Photography', 'Music', 'Fitness', 'Cricket', 'Movies', 'Art', 'Food'],
-    tags: ['Dom', 'Kinky', 'Leather', 'BDSM', 'Rope Play'],
-    location: { city: 'Mumbai' },
-    verified: true,
-    pronouns: 'He/Him',
-    orientation: 'Gay',
-  };
+  // Only show profile if we have real user data
+  if (!user && !isLoading && !error) {
+    return null; // No data yet, waiting for auto-fetch
+  }
 
-  const stats = {
-    seductions: '2.4k',
-    likes: matches.length || 33,
-    matches: 156,
-    superLikes: 12,
-  };
+  // Use real stats from user object
+  const stats = user ? {
+    seductions: user.stats?.seductions?.toLocaleString() || '0',
+    likes: user.stats?.likes || 0,
+    matches: matches.length || 0,
+    superLikes: 0, // Not available from backend yet
+  } : { seductions: '0', likes: 0, matches: 0, superLikes: 0 };
 
-  const prompts = [
-    { prompt: 'A life goal of mine', answer: 'To visit every continent and capture moments through my lens' },
-    { prompt: "I'm looking for", answer: 'Someone who laughs at my terrible jokes and enjoys spontaneous adventures' },
-  ];
+  // Use real prompts from user object
+  const prompts = user?.prompts || [];
 
-  const languages = ['Hindi', 'English', 'Marathi'];
+  // Use real opening moves from user object
+  const openingMoves = user?.openingMoves || [];
+
+  // Use real languages from user object
+  const languages = user?.languages || [];
 
   return (
     <GestureHandlerRootView style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: COLLAPSED_HEIGHT + 120 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: COLLAPSED_HEIGHT + 120 + insets.bottom }]}
         bounces={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refreshProfile}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
+        {/* Loading state - Initial load only */}
+        {isLoading && !user && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Loading your profile...</Text>
+          </View>
+        )}
+
+        {/* Error handling */}
+        {error && !isLoading && (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color={colors.primary} />
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable
+              style={styles.retryButton}
+              onPress={() => {
+                clearError();
+                refreshProfile();
+              }}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Header with actions */}
         <SafeAreaView style={styles.headerActions} edges={['top']}>
           <Pressable style={styles.headerActionButton} onPress={handleSettings}>
@@ -620,33 +683,40 @@ export const ProfileScreen: React.FC = () => {
             </View>
 
             {/* Center Profile Image (overlapping) */}
-            <Pressable
-              style={styles.profileImageContainer}
-              onPress={() => handlePhotoPress(0)}
-            >
-              <RedBorder size={116} borderWidth={3}>
-                <Image
-                  source={{ uri: displayUser.photos[0] }}
-                  style={styles.statsProfileImage}
-                />
-              </RedBorder>
-            </Pressable>
+            {user?.photos?.[0] && (
+              <Pressable
+                style={styles.profileImageContainer}
+                onPress={() => handlePhotoPress(0)}
+              >
+                <RedBorder size={116} borderWidth={3}>
+                  <Image
+                    source={{ uri: user.photos[0] }}
+                    style={styles.statsProfileImage}
+                  />
+                </RedBorder>
+              </Pressable>
+            )}
           </View>
 
           {/* Name and details below */}
           <View style={styles.profileInfoSection}>
             <View style={styles.nameRow}>
-              <Text style={styles.profileName}>{displayUser.name}</Text>
-              <Text style={styles.profileAge}>, {displayUser.age}</Text>
-              {displayUser.verified && (
+              <Text style={styles.profileName}>{user?.name}</Text>
+              <Text style={styles.profileAge}>, {user?.age}</Text>
+              {user?.verified && (
                 <View style={styles.verifiedBadge}>
                   <Ionicons name="checkmark-circle" size={24} color="#1DA1F2" />
                 </View>
               )}
             </View>
+            {user?.gender && (
+              <Text style={styles.profileGender}>
+                {user.gender}{user.pronouns ? ` · ${user.pronouns}` : ''}
+              </Text>
+            )}
             <View style={styles.locationRow}>
               <Ionicons name="pin" size={16} color={colors.primary} />
-              <Text style={styles.profileLocation}>{displayUser.location.city}</Text>
+              <Text style={styles.profileLocation}>{user?.location?.city || 'Unknown'}</Text>
             </View>
 
             {/* Matches count */}
@@ -660,15 +730,17 @@ export const ProfileScreen: React.FC = () => {
         {/* Bento Grid Section */}
         <View style={styles.bentoGrid}>
           {/* Bio - Large card */}
-          <BentoBox style={styles.bentoBioCard} delay={450}>
-            <View style={styles.bentoHeader}>
-              <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                <Ionicons name="person" size={18} color="#FFFFFF" />
+          {user?.bio && (
+            <BentoBox style={styles.bentoBioCard} delay={450}>
+              <View style={styles.bentoHeader}>
+                <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+                  <Ionicons name="person" size={18} color="#FFFFFF" />
+                </View>
+                <Text style={styles.bentoTitle}>About Me</Text>
               </View>
-              <Text style={styles.bentoTitle}>About Me</Text>
-            </View>
-            <Text style={styles.bentoBioText}>{displayUser.bio}</Text>
-          </BentoBox>
+              <Text style={styles.bentoBioText}>{user.bio}</Text>
+            </BentoBox>
+          )}
 
           {/* Two column layout */}
           <View style={styles.bentoRow}>
@@ -678,7 +750,7 @@ export const ProfileScreen: React.FC = () => {
                 <Ionicons name="male-female" size={18} color="#FFFFFF" />
               </View>
               <Text style={styles.bentoSmallLabel}>Pronouns</Text>
-              <Text style={styles.bentoSmallValue}>{displayUser.pronouns || 'Not set'}</Text>
+              <Text style={styles.bentoSmallValue}>{user?.pronouns || 'Not set'}</Text>
             </BentoBox>
 
             {/* Verified card */}
@@ -687,7 +759,7 @@ export const ProfileScreen: React.FC = () => {
                 <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
               </View>
               <Text style={styles.bentoSmallLabel}>Status</Text>
-              <Text style={styles.bentoSmallValue}>{displayUser.verified ? 'Verified' : 'Not verified'}</Text>
+              <Text style={styles.bentoSmallValue}>{user?.verified ? 'Verified' : 'Not verified'}</Text>
             </BentoBox>
           </View>
 
@@ -700,10 +772,10 @@ export const ProfileScreen: React.FC = () => {
               <Text style={styles.bentoTitle}>Sexual Orientation</Text>
             </View>
             <View style={styles.orientationDisplay}>
-              {displayUser.orientation ? (
+              {user?.orientation ? (
                 <View style={styles.orientationChipSelected}>
                   <Ionicons name="heart" size={16} color="#fff" style={{ marginRight: 6 }} />
-                  <Text style={styles.orientationChipTextSelected}>{displayUser.orientation}</Text>
+                  <Text style={styles.orientationChipTextSelected}>{user.orientation}</Text>
                 </View>
               ) : (
                 <Pressable
@@ -720,29 +792,8 @@ export const ProfileScreen: React.FC = () => {
             </View>
           </BentoBox>
 
-          {/* Interests - Full width with horizontal scroll feel */}
-          <BentoBox style={styles.bentoInterestsCard} delay={600}>
-            <View style={styles.bentoHeader}>
-              <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                <Ionicons name="sparkles" size={18} color="#FFFFFF" />
-              </View>
-              <Text style={styles.bentoTitle}>Interests</Text>
-            </View>
-            <View style={styles.interestsWrap}>
-              {displayUser.interests.map((interest, index) => (
-                <Animated.View
-                  key={index}
-                  entering={FadeInUp.delay(650 + index * 50).springify()}
-                  style={styles.interestChip}
-                >
-                  <Text style={styles.interestChipText}>{interest}</Text>
-                </Animated.View>
-              ))}
-            </View>
-          </BentoBox>
-
           {/* Tags - if available */}
-          {displayUser.tags && displayUser.tags.length > 0 && (
+          {user?.tags && user.tags.length > 0 && (
             <BentoBox style={styles.bentoTagsCard} delay={650}>
               <View style={styles.bentoHeader}>
                 <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
@@ -751,7 +802,7 @@ export const ProfileScreen: React.FC = () => {
                 <Text style={styles.bentoTitle}>Tags</Text>
               </View>
               <View style={styles.tagsWrap}>
-                {displayUser.tags.map((tag, index) => (
+                {user.tags.map((tag, index) => (
                   <Animated.View
                     key={index}
                     entering={FadeInUp.delay(700 + index * 50).springify()}
@@ -764,38 +815,60 @@ export const ProfileScreen: React.FC = () => {
             </BentoBox>
           )}
 
-          {/* Prompts - Stacked cards */}
-          <BentoBox style={styles.bentoPromptsCard} delay={700}>
-            <View style={styles.bentoHeader}>
-              <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                <Ionicons name="chatbubble-ellipses" size={18} color="#FFFFFF" />
+          {/* Prompts - Stacked cards - Only show if available */}
+          {prompts.length > 0 && (
+            <BentoBox style={styles.bentoPromptsCard} delay={700}>
+              <View style={styles.bentoHeader}>
+                <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#FFFFFF" />
+                </View>
+                <Text style={styles.bentoTitle}>My Prompts</Text>
               </View>
-              <Text style={styles.bentoTitle}>My Prompts</Text>
-            </View>
-            {prompts.map((prompt, index) => (
-              <View key={index} style={styles.promptItem}>
-                <Text style={styles.promptQuestion}>{prompt.prompt}</Text>
-                <Text style={styles.promptAnswer}>{prompt.answer}</Text>
-              </View>
-            ))}
-          </BentoBox>
-
-          {/* Languages - Horizontal */}
-          <BentoBox style={styles.bentoLanguagesCard} delay={750}>
-            <View style={styles.bentoHeader}>
-              <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-                <Ionicons name="globe" size={18} color="#FFFFFF" />
-              </View>
-              <Text style={styles.bentoTitle}>Languages</Text>
-            </View>
-            <View style={styles.languagesRow}>
-              {languages.map((lang, index) => (
-                <View key={index} style={styles.languageChip}>
-                  <Text style={styles.languageChipText}>{lang}</Text>
+              {prompts.map((prompt, index) => (
+                <View key={index} style={styles.promptItem}>
+                  <Text style={styles.promptQuestion}>{prompt.question}</Text>
+                  <Text style={styles.promptAnswer}>{prompt.answer}</Text>
                 </View>
               ))}
-            </View>
-          </BentoBox>
+            </BentoBox>
+          )}
+
+          {/* Opening Moves - Only show if available */}
+          {openingMoves.length > 0 && (
+            <BentoBox style={styles.bentoPromptsCard} delay={725}>
+              <View style={styles.bentoHeader}>
+                <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+                  <Ionicons name="chatbubble-outline" size={18} color="#FFFFFF" />
+                </View>
+                <Text style={styles.bentoTitle}>Opening Moves</Text>
+              </View>
+              {openingMoves.map((move, index) => (
+                <View key={index} style={styles.promptItem}>
+                  <Text style={styles.promptQuestion}>{move.question}</Text>
+                  <Text style={styles.promptAnswer}>{move.answer}</Text>
+                </View>
+              ))}
+            </BentoBox>
+          )}
+
+          {/* Languages - Horizontal - Only show if available */}
+          {languages.length > 0 && (
+            <BentoBox style={styles.bentoLanguagesCard} delay={750}>
+              <View style={styles.bentoHeader}>
+                <View style={[styles.bentoIconContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+                  <Ionicons name="globe" size={18} color="#FFFFFF" />
+                </View>
+                <Text style={styles.bentoTitle}>Languages</Text>
+              </View>
+              <View style={styles.languagesRow}>
+                {languages.map((lang, index) => (
+                  <View key={index} style={styles.languageChip}>
+                    <Text style={styles.languageChipText}>{lang}</Text>
+                  </View>
+                ))}
+              </View>
+            </BentoBox>
+          )}
         </View>
 
         {/* Logout Button */}
@@ -808,45 +881,98 @@ export const ProfileScreen: React.FC = () => {
           </Pressable>
         </Animated.View>
 
-        {/* Premium CTA - Special card */}
+        {/* Premium Section */}
         <Animated.View entering={FadeInUp.delay(850).springify()} style={styles.premiumSection}>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              setShowPlanModal(true);
-            }}
-          >
+          {subscriptionInfo?.is_premium && subscriptionInfo.subscription ? (
+            // Active subscription info
             <LinearGradient
               colors={['rgba(229, 57, 53, 0.3)', 'rgba(183, 28, 28, 0.2)']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.premiumCard}
             >
-              <View style={styles.premiumIconBg}>
-                <Ionicons name="diamond" size={28} color={colors.primary} />
-              </View>
-              <View style={styles.premiumContent}>
-                <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
-                <Text style={styles.premiumSubtitle}>Unlock unlimited likes, see who likes you & more</Text>
-              </View>
-              <View style={styles.premiumArrow}>
-                <Ionicons name="arrow-forward" size={20} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="diamond" size={20} color="#FFD700" />
+                  <Text style={[styles.premiumTitle, { marginLeft: 8, color: '#FFD700' }]}>
+                    {subscriptionInfo.subscription.plan_type === 'annual' ? 'Premium+' : 'Premium'}
+                  </Text>
+                  <View style={{
+                    backgroundColor: subscriptionInfo.subscription.status === 'active' ? 'rgba(76,175,80,0.2)' : 'rgba(255,152,0,0.2)',
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 10,
+                    marginLeft: 8,
+                  }}>
+                    <Text style={{
+                      color: subscriptionInfo.subscription.status === 'active' ? '#4CAF50' : '#FF9800',
+                      fontSize: 11,
+                      fontWeight: '600',
+                      textTransform: 'uppercase',
+                    }}>
+                      {subscriptionInfo.subscription.status}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.premiumSubtitle}>
+                  {subscriptionInfo.subscription.status === 'cancelled' ? 'Access until: ' : 'Expires: '}
+                  {new Date(subscriptionInfo.subscription.expires_at).toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'long', year: 'numeric'
+                  })}
+                </Text>
+                {subscriptionInfo.subscription.status === 'active' && (
+                  <Pressable
+                    onPress={handleCancelSubscription}
+                    disabled={isCancelling}
+                    style={{ marginTop: 10 }}
+                  >
+                    <Text style={{ color: colors.textMuted, fontSize: 13, textDecorationLine: 'underline' }}>
+                      {isCancelling ? 'Cancelling...' : 'Cancel Subscription'}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             </LinearGradient>
-          </Pressable>
+          ) : (
+            // Upgrade CTA
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setShowPlanModal(true);
+              }}
+            >
+              <LinearGradient
+                colors={['rgba(229, 57, 53, 0.3)', 'rgba(183, 28, 28, 0.2)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.premiumCard}
+              >
+                <View style={styles.premiumIconBg}>
+                  <Ionicons name="diamond" size={28} color={colors.primary} />
+                </View>
+                <View style={styles.premiumContent}>
+                  <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
+                  <Text style={styles.premiumSubtitle}>Unlock unlimited likes, see who liked you & more</Text>
+                </View>
+                <View style={styles.premiumArrow}>
+                  <Ionicons name="arrow-forward" size={20} color={colors.primary} />
+                </View>
+              </LinearGradient>
+            </Pressable>
+          )}
         </Animated.View>
 
         {/* Quick Actions */}
         <View style={styles.quickActionsSection}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.quickActionsGrid}>
-            <Pressable style={styles.quickActionCard} onPress={() => Alert.alert('Invite Friends')}>
+            {/* <Pressable style={styles.quickActionCard} onPress={() => Alert.alert('Invite Friends')}>
               <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
                 <Ionicons name="gift" size={24} color="#FFFFFF" />
               </View>
               <Text style={styles.quickActionText} numberOfLines={1}>Invite</Text>
-            </Pressable>
-            <Pressable style={styles.quickActionCard} onPress={() => Alert.alert('Safety Tips')}>
+            </Pressable> */}
+            <Pressable style={styles.quickActionCard} onPress={() => setShowSafetyModal(true)}>
               <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
                 <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
               </View>
@@ -869,7 +995,7 @@ export const ProfileScreen: React.FC = () => {
 
         {/* Footer */}
         <Animated.View entering={FadeIn.delay(900)} style={styles.footer}>
-          <Text style={styles.footerText}>InBlood v1.0.0</Text>
+          <Text style={styles.footerText}>InBlood v{Constants.expoConfig?.version || '1.0.0'}</Text>
           <Text style={styles.footerSubtext}>Made with love in India</Text>
         </Animated.View>
       </ScrollView>
@@ -877,7 +1003,7 @@ export const ProfileScreen: React.FC = () => {
       {/* Photo Viewer Modal */}
       <PhotoViewer
         visible={showPhotoViewer}
-        photos={displayUser.photos}
+        photos={user?.photos || []}
         initialIndex={selectedPhotoIndex}
         onClose={() => setShowPhotoViewer(false)}
       />
@@ -886,15 +1012,18 @@ export const ProfileScreen: React.FC = () => {
       <PlanDetailsModal
         visible={showPlanModal}
         onClose={() => setShowPlanModal(false)}
+        plans={plans}
         selectedPlan={selectedPlan}
         onSelectPlan={setSelectedPlan}
+        onPaymentSuccess={() => { refreshPremiumStatus(); fetchSubscriptionInfo(); }}
       />
 
       {/* Photo Sheet */}
       <PhotoSheet
-        photos={displayUser.photos}
+        photos={user?.photos || []}
         onPhotoPress={handlePhotoPress}
       />
+      <SafetyModal visible={showSafetyModal} onClose={() => setShowSafetyModal(false)} />
     </GestureHandlerRootView>
   );
 };
@@ -1090,35 +1219,44 @@ const modalStyles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: borderRadius.xl,
     padding: spacing.lg,
+    paddingTop: spacing.lg + 4,
     marginBottom: spacing.md,
     borderWidth: 2,
-    position: 'relative',
+    overflow: 'visible' as const,
   },
   planCardSelected: {
-    backgroundColor: 'rgba(229, 57, 53, 0.1)',
+    backgroundColor: 'rgba(229, 57, 53, 0.08)',
   },
   planBadge: {
-    position: 'absolute',
-    top: -10,
+    position: 'absolute' as const,
+    top: -12,
     right: spacing.lg,
     paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.sm,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    zIndex: 1,
   },
   planBadgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    color: colors.background,
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#000',
+    letterSpacing: 0.5,
   },
   planHeader: { marginBottom: spacing.md },
+  planNameRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+  },
   planName: {
     fontSize: fontSize.xl,
     fontWeight: fontWeight.bold,
   },
   priceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: 'row' as const,
+    alignItems: 'baseline' as const,
     marginTop: spacing.xs,
+    gap: 2,
   },
   currency: {
     fontSize: fontSize.lg,
@@ -1133,25 +1271,27 @@ const modalStyles = StyleSheet.create({
   planPeriod: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
-    marginLeft: 4,
+    marginLeft: 2,
   },
-  featuresList: { gap: spacing.sm },
+  originalPrice: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    textDecorationLine: 'line-through' as const,
+    marginLeft: 8,
+  },
+  featuresList: { gap: 6 },
   featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
   },
   featureText: {
     fontSize: fontSize.sm,
     color: colors.text,
+    flex: 1,
   },
   featureTextDisabled: {
     color: colors.textMuted,
-  },
-  selectedIndicator: {
-    position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
   },
   subscribeButton: {
     marginTop: spacing.lg,
@@ -1256,13 +1396,14 @@ const styles = StyleSheet.create({
     left: 30,
     borderRadius: 45,
     backgroundColor: '#FF9800',
-    opacity: 1,
-    zIndex: -1,
+    opacity: 0.6,
+    // iOS glow via shadow (no effect on Android)
     shadowColor: '#FF9800',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 60,
-    elevation: 30,
+    // No elevation — on Android it raises the solid shape above everything
+    // and doesn't produce colored glows (only gray shadows)
   },
   rightEllipse: {
     position: 'absolute',
@@ -1271,13 +1412,11 @@ const styles = StyleSheet.create({
     right: 30,
     borderRadius: 45,
     backgroundColor: '#D32F2F',
-    opacity: 1,
-    zIndex: -1,
+    opacity: 0.6,
     shadowColor: '#D32F2F',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 60,
-    elevation: 30,
   },
   statsRectangle: {
     width: SCREEN_WIDTH - spacing.lg * 2,
@@ -1288,6 +1427,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
     backgroundColor: '#0D0D0D',
     zIndex: 0,
+    elevation: 1,
   },
   statsContent: {
     flexDirection: 'row',
@@ -1296,6 +1436,7 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: spacing.xl,
     zIndex: 1,
+    elevation: 2,
   },
   statsSide: {
     alignItems: 'center',
@@ -1322,6 +1463,7 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 55,
     zIndex: 10,
+    elevation: 3,
   },
   statsProfileImage: {
     width: 110,
@@ -1386,6 +1528,11 @@ const styles = StyleSheet.create({
   },
   verifiedBadge: {
     marginLeft: spacing.sm,
+  },
+  profileGender: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   locationRow: {
     flexDirection: 'row',
@@ -1497,23 +1644,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.text,
     marginTop: 4,
-  },
-  bentoInterestsCard: {},
-  interestsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  interestChip: {
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.full,
-  },
-  interestChipText: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
-    fontWeight: fontWeight.medium,
   },
   bentoTagsCard: {},
   tagsWrap: {
@@ -1752,4 +1882,43 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: '#FF4444',
   },
+  // Loading Container
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: spacing.xxl * 2,
+  },
+  loadingText: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+  },
+  // Error Container
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: spacing.xxl * 2,
+    paddingHorizontal: spacing.xl,
+  },
+  errorText: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    borderRadius: borderRadius.full,
+  },
+  retryButtonText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+  },
 });
+

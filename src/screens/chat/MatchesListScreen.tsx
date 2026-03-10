@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,21 +8,20 @@ import {
   Pressable,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInDown,
-  FadeInRight,
   useSharedValue,
   useAnimatedStyle,
   withSpring,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useMatches, useChat } from '../../context';
+import { useMatches, useChat, useUser } from '../../context';
 import { Match } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 
@@ -30,12 +29,29 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type RootStackParamList = {
   MatchesList: undefined;
-  ChatScreen: { matchId: string; profile: any };
+  ChatScreen: { matchId: string; conversationId: string; profile: any };
 };
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Section header component
+const SectionHeader: React.FC<{
+  title: string;
+  count?: number;
+}> = ({ title, count }) => {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderText}>
+        {title}
+        {count !== undefined && count > 0 && (
+          <Text style={styles.sectionHeaderCount}> ({count})</Text>
+        )}
+      </Text>
+    </View>
+  );
+};
 
 // Pinned card component (first card with heart/likes)
 const LikesCard: React.FC<{ likesCount: number; onPress: () => void }> = ({
@@ -106,10 +122,16 @@ const PinnedProfileCard: React.FC<{
       onPress={onPress}
       style={[styles.pinnedCard, animatedStyle]}
     >
-      <Image
-        source={{ uri: match.profile.photos[0] }}
-        style={styles.pinnedImage}
-      />
+      {match.profile.photos[0] ? (
+        <Image
+          source={{ uri: match.profile.photos[0] }}
+          style={styles.pinnedImage}
+        />
+      ) : (
+        <View style={styles.pinnedImagePlaceholder}>
+          <Ionicons name="person" size={36} color={colors.textSecondary} />
+        </View>
+      )}
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.7)']}
         style={styles.pinnedGradient}
@@ -126,8 +148,10 @@ const PinnedProfileCard: React.FC<{
 const ChatItem: React.FC<{
   match: Match;
   onPress: () => void;
+  onLongPress?: () => void;
   index: number;
-}> = ({ match, onPress, index }) => {
+  showNewBadge?: boolean;
+}> = ({ match, onPress, onLongPress, index, showNewBadge = false }) => {
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -147,7 +171,15 @@ const ChatItem: React.FC<{
     onPress();
   }, [onPress]);
 
+  const handleLongPress = useCallback(() => {
+    if (onLongPress) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      onLongPress();
+    }
+  }, [onLongPress]);
+
   const formatTime = (date: Date) => {
+    if (!date || isNaN(date.getTime())) return '';
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / (1000 * 60));
@@ -164,21 +196,40 @@ const ChatItem: React.FC<{
 
   return (
     <AnimatedPressable
-      entering={FadeInRight.delay(index * 50).duration(300)}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       onPress={handlePress}
-      style={[styles.chatItem, animatedStyle]}
+      onLongPress={handleLongPress}
+      delayLongPress={500}
+      style={[styles.chatItem, hasUnread && styles.chatItemUnread, animatedStyle]}
     >
-      <Image
-        source={{ uri: match.profile.photos[0] }}
-        style={styles.chatAvatar}
-      />
+      <View style={styles.avatarContainer}>
+        {match.profile.photos[0] ? (
+          <Image
+            source={{ uri: match.profile.photos[0] }}
+            style={[styles.chatAvatar, hasUnread && styles.chatAvatarUnread]}
+          />
+        ) : (
+          <View style={[styles.chatAvatar, styles.avatarPlaceholder, hasUnread && styles.chatAvatarUnread]}>
+            <Ionicons name="person" size={28} color={colors.textSecondary} />
+          </View>
+        )}
+        {showNewBadge && (
+          <View style={styles.newBadge}>
+            <Text style={styles.newBadgeText}>NEW</Text>
+          </View>
+        )}
+      </View>
 
       <View style={styles.chatContent}>
-        <Text style={[styles.chatName, hasUnread && styles.chatNameUnread]} numberOfLines={1}>
-          {match.profile.name}
-        </Text>
+        <View style={styles.chatNameRow}>
+          <Text style={[styles.chatName, hasUnread && styles.chatNameUnread]} numberOfLines={1}>
+            {match.profile.name}
+          </Text>
+          {match.isPinned && (
+            <Ionicons name="pin" size={14} color={colors.primary} style={styles.pinIcon} />
+          )}
+        </View>
         <Text style={[styles.chatMessage, hasUnread && styles.chatMessageUnread]} numberOfLines={1}>
           {match.lastMessage?.text || 'Say hello! 👋'}
         </Text>
@@ -186,11 +237,17 @@ const ChatItem: React.FC<{
 
       <View style={styles.chatMeta}>
         {match.lastMessage && (
-          <Text style={styles.chatTime}>
+          <Text style={[styles.chatTime, hasUnread && styles.chatTimeUnread]}>
             {formatTime(match.lastMessage.timestamp)}
           </Text>
         )}
-        {hasUnread && <View style={styles.unreadDot} />}
+        {hasUnread && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadBadgeText}>
+              {match.unreadCount > 9 ? '9+' : match.unreadCount}
+            </Text>
+          </View>
+        )}
       </View>
     </AnimatedPressable>
   );
@@ -198,39 +255,110 @@ const ChatItem: React.FC<{
 
 export const MatchesListScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { matches } = useMatches();
-  const { chats } = useChat();
+  const { matches, conversations, fetchMatches, fetchConversations, pinMatch, unpinMatch, fetchPendingLikes } = useMatches();
+  const { chats, subscribeToConversationPreviews } = useChat();
+  const { user } = useUser();
+  const insets = useSafeAreaInsets();
 
-  // Separate new matches (no messages) from active chats
-  const { newMatches, activeChats, likesCount } = useMemo(() => {
+  // Force-refresh matches, conversations, and pending likes every time screen gains focus.
+  // fetchConversations pulls GET /conversations which includes non-matched DMs.
+  useFocusEffect(
+    useCallback(() => {
+      fetchMatches(20, 0, true);
+      fetchConversations();
+      fetchPendingLikes();
+    }, [fetchMatches, fetchConversations, fetchPendingLikes])
+  );
+
+  // Subscribe to last-message previews for ALL conversations (matched + non-matched)
+  useEffect(() => {
+    const matchedIds = matches.map(m => m.conversationId || m.id).filter(Boolean);
+    const requestIds = conversations.map(c => c.conversationId || c.id).filter(Boolean);
+    const allIds = [...new Set([...matchedIds, ...requestIds])];
+    if (allIds.length > 0) {
+      subscribeToConversationPreviews(allIds);
+    }
+  }, [matches, conversations, subscribeToConversationPreviews]);
+
+  // Separate conversations into pinned, new matches, regular messages, and message requests
+  const { pinnedMatches, newMatches, regularMatches, messageRequests, likesCount } = useMemo(() => {
+    const pinned: Match[] = [];
     const newM: Match[] = [];
-    const active: Match[] = [];
+    const regular: Match[] = [];
+
+    const now = Date.now();
+    const oneDayInMs = 24 * 60 * 60 * 1000;
 
     matches.forEach(match => {
-      const chat = chats.get(match.id);
-      if (chat && chat.messages.length > 0) {
-        active.push({
-          ...match,
-          lastMessage: chat.messages[chat.messages.length - 1],
-        });
+      const chat = chats.get(match.conversationId || match.id);
+      const realMessages = chat ? chat.messages.filter(m => m.type !== 'opening_move') : [];
+      const hasMessages = realMessages.length > 0;
+      const matchTime = match.matchedAt?.getTime?.() || 0;
+      const matchAge = now - matchTime;
+      const isNew = !hasMessages && matchAge > 0 && matchAge < oneDayInMs;
+
+      const enrichedMatch = {
+        ...match,
+        lastMessage: hasMessages ? realMessages[realMessages.length - 1] : undefined,
+      };
+
+      if (enrichedMatch.isPinned) {
+        pinned.push(enrichedMatch);
+      } else if (isNew) {
+        newM.push(enrichedMatch);
       } else {
-        newM.push(match);
+        regular.push(enrichedMatch);
       }
     });
 
-    // Sort active chats by last message time
-    active.sort((a, b) => {
-      const timeA = a.lastMessage?.timestamp?.getTime() || 0;
-      const timeB = b.lastMessage?.timestamp?.getTime() || 0;
-      return timeB - timeA;
-    });
+    // Build set of matched conversation IDs to exclude from requests.
+    // Prevents a conversation from appearing in both "Messages" and "Message Requests"
+    // during the brief window when a non-matched conversation becomes a match.
+    const matchedConvIds = new Set(
+      matches.map(m => m.conversationId || m.id).filter(Boolean)
+    );
 
-    return { newMatches: newM, activeChats: active, likesCount: 32 }; // Mock likes count
-  }, [matches, chats]);
+    // Enrich non-matched conversations with the latest message preview from Firebase,
+    // skipping any that have already been promoted to a match.
+    const requests: Match[] = conversations
+      .filter(conv => !matchedConvIds.has(conv.conversationId || conv.id))
+      .map(conv => {
+        const chat = chats.get(conv.conversationId || conv.id);
+        const realMessages = chat ? chat.messages.filter(m => m.type !== 'opening_move') : [];
+        const hasMessages = realMessages.length > 0;
+        return {
+          ...conv,
+          lastMessage: hasMessages
+            ? realMessages[realMessages.length - 1]
+            : conv.lastMessage,
+        };
+      });
+
+    // Sort each section by last message time (or match time for new matches)
+    const sortByTime = (a: Match, b: Match) => {
+      const timeA = a.lastMessage?.timestamp?.getTime?.() || a.matchedAt?.getTime?.() || 0;
+      const timeB = b.lastMessage?.timestamp?.getTime?.() || b.matchedAt?.getTime?.() || 0;
+      return timeB - timeA;
+    };
+
+    pinned.sort(sortByTime);
+    newM.sort((a, b) => (b.matchedAt?.getTime?.() || 0) - (a.matchedAt?.getTime?.() || 0));
+    regular.sort(sortByTime);
+    requests.sort(sortByTime);
+
+    return {
+      pinnedMatches: pinned,
+      newMatches: newM,
+      regularMatches: regular,
+      messageRequests: requests,
+      likesCount: user?.stats?.likes ?? 0,
+    };
+  }, [matches, conversations, chats, user?.stats?.likes]);
 
   const handleMatchPress = useCallback((match: Match) => {
     navigation.navigate('ChatScreen', {
       matchId: match.id,
+      conversationId: match.conversationId || match.id,
       profile: match.profile,
     });
   }, [navigation]);
@@ -240,9 +368,23 @@ export const MatchesListScreen: React.FC = () => {
     // Navigate to likes screen or show premium modal
   }, []);
 
-  const allChats = useMemo(() => {
-    return [...newMatches, ...activeChats];
-  }, [newMatches, activeChats]);
+  const handlePinToggle = useCallback((match: Match) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (match.isPinned) {
+      // Unpin the conversation
+      unpinMatch(match.id);
+    } else {
+      // Pin the conversation
+      pinMatch(match.id);
+    }
+  }, [pinMatch, unpinMatch]);
+
+  const hasAnyConversations =
+    pinnedMatches.length > 0 ||
+    newMatches.length > 0 ||
+    regularMatches.length > 0 ||
+    messageRequests.length > 0;
 
   return (
     <View style={styles.container}>
@@ -265,7 +407,7 @@ export const MatchesListScreen: React.FC = () => {
 
           {/* Pinned Messages Section */}
           <Animated.View entering={FadeIn.delay(200)} style={styles.pinnedSection}>
-            <Text style={styles.pinnedTitle}>Pinned Messages</Text>
+            <Text style={styles.pinnedTitle}>New Matches</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -295,7 +437,7 @@ export const MatchesListScreen: React.FC = () => {
           <View style={styles.handle} />
         </View>
 
-        {allChats.length === 0 ? (
+        {!hasAnyConversations ? (
           <View style={styles.emptyContainer}>
             <Animated.View entering={FadeIn} style={styles.emptyContent}>
               <View style={styles.emptyIcon}>
@@ -311,16 +453,71 @@ export const MatchesListScreen: React.FC = () => {
           <ScrollView
             style={styles.chatScrollView}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.chatScrollContent}
+            contentContainerStyle={[styles.chatScrollContent, { paddingBottom: 100 + insets.bottom }]}
           >
-            {allChats.map((match, index) => (
-              <ChatItem
-                key={match.id}
-                match={match}
-                index={index}
-                onPress={() => handleMatchPress(match)}
-              />
-            ))}
+            {/* Pinned Section */}
+            {pinnedMatches.length > 0 && (
+              <>
+                <SectionHeader title="Pinned" count={pinnedMatches.length} />
+                {pinnedMatches.map((match, index) => (
+                  <ChatItem
+                    key={match.id}
+                    match={match}
+                    index={index}
+                    onPress={() => handleMatchPress(match)}
+                    onLongPress={() => handlePinToggle(match)}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* New Matches Section */}
+            {newMatches.length > 0 && (
+              <>
+                <SectionHeader title="New Matches" count={newMatches.length} />
+                {newMatches.map((match, index) => (
+                  <ChatItem
+                    key={match.id}
+                    match={match}
+                    index={index}
+                    showNewBadge
+                    onPress={() => handleMatchPress(match)}
+                    onLongPress={() => handlePinToggle(match)}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Regular Messages Section */}
+            {regularMatches.length > 0 && (
+              <>
+                <SectionHeader title="Messages" />
+                {regularMatches.map((match, index) => (
+                  <ChatItem
+                    key={match.id}
+                    match={match}
+                    index={index}
+                    onPress={() => handleMatchPress(match)}
+                    onLongPress={() => handlePinToggle(match)}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Message Requests Section — non-matched users who initiated a conversation */}
+            {messageRequests.length > 0 && (
+              <>
+                <SectionHeader title="Message Requests" count={messageRequests.length} />
+                {messageRequests.map((conv, index) => (
+                  <ChatItem
+                    key={conv.id}
+                    match={conv}
+                    index={index}
+                    onPress={() => handleMatchPress(conv)}
+                  />
+                ))}
+              </>
+            )}
           </ScrollView>
         )}
       </View>
@@ -416,6 +613,13 @@ const styles = StyleSheet.create({
     height: '100%',
     resizeMode: 'cover',
   },
+  pinnedImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   pinnedGradient: {
     position: 'absolute',
     bottom: 0,
@@ -453,33 +657,93 @@ const styles = StyleSheet.create({
   },
   chatScrollContent: {
     paddingHorizontal: spacing.md,
-    paddingBottom: 100,
+  },
+  sectionHeader: {
+    paddingVertical: spacing.sm,
+    paddingTop: spacing.lg,
+  },
+  sectionHeaderText: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionHeaderCount: {
+    color: colors.textMuted,
+    fontWeight: '500',
   },
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+    borderRadius: borderRadius.lg,
+  },
+  chatItemUnread: {
+    backgroundColor: 'rgba(229, 57, 53, 0.06)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: spacing.md,
   },
   chatAvatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    marginRight: spacing.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  chatAvatarUnread: {
+    borderColor: colors.primary,
+  },
+  avatarPlaceholder: {
+    backgroundColor: colors.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  newBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.background,
+  },
+  newBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   chatContent: {
     flex: 1,
     justifyContent: 'center',
   },
+  chatNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   chatName: {
     fontSize: fontSize.lg,
     fontWeight: '500',
     color: colors.text,
-    marginBottom: 4,
+    flex: 1,
   },
   chatNameUnread: {
     fontWeight: '700',
+  },
+  pinIcon: {
+    marginLeft: spacing.xs,
+    transform: [{ rotate: '45deg' }],
   },
   chatMessage: {
     fontSize: fontSize.md,
@@ -498,11 +762,23 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginBottom: 6,
   },
-  unreadDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  chatTimeUnread: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  unreadBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   emptyContainer: {
     flex: 1,

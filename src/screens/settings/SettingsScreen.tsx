@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,7 +7,10 @@ import {
   Pressable,
   Switch,
   Alert,
+  Share,
+  ActivityIndicator,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
@@ -20,11 +23,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { useAuth, useUser } from '../../context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
-
-type RootStackParamList = {
-  Settings: undefined;
-  Onboarding: undefined;
-};
+import { updatePrivacySettings } from '../../services/settings.service';
+import { SafetyModal } from '../../components/modals/SafetyModal';
+import { TermsModal } from '../../components/modals/TermsModal';
+import { RootStackParamList } from '../../navigation/types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -61,15 +63,75 @@ const SettingItem: React.FC<SettingItemProps> = ({
   </Pressable>
 );
 
+// Show Distance has 3 states: exact → approximate → hide → exact
+const DISTANCE_OPTIONS = ['exact', 'approximate', 'hide'] as const;
+type DistanceOption = typeof DISTANCE_OPTIONS[number];
+const DISTANCE_LABELS: Record<DistanceOption, string> = {
+  exact: 'Exact distance',
+  approximate: 'Approximate',
+  hide: 'Hidden',
+};
+
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const { logout } = useAuth();
-  const { clearUser } = useUser();
+  const { user, clearUser, refreshProfile } = useUser();
 
-  const [notifications, setNotifications] = useState(true);
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [showDistance, setShowDistance] = useState(true);
-  const [showAge, setShowAge] = useState(true);
+  // Privacy settings - initialized from user profile
+  const [isDiscoverable, setIsDiscoverable] = useState(user?.settings?.isDiscoverable ?? true);
+  const [showDistance, setShowDistance] = useState<DistanceOption>(user?.settings?.showDistance ?? 'exact');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [showSafetyModal, setShowSafetyModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+
+  // Sync local state when user profile loads/updates
+  useEffect(() => {
+    if (user?.settings) {
+      setIsDiscoverable(user.settings.isDiscoverable);
+      setShowDistance(user.settings.showDistance);
+    }
+  }, [user?.settings]);
+
+  const saveSettings = useCallback(async (
+    updates: { is_discoverable?: boolean; show_distance?: DistanceOption }
+  ) => {
+    setSavingSettings(true);
+    try {
+      const response = await updatePrivacySettings(updates);
+      if (response.success) {
+        // Refresh profile to sync state
+        await refreshProfile();
+      } else {
+        throw new Error(response.message || 'Failed to update settings');
+      }
+    } catch (error: any) {
+      console.error('[Settings] Error saving:', error.message);
+      Alert.alert('Error', 'Failed to save settings. Please try again.');
+      // Revert local state
+      if (user?.settings) {
+        setIsDiscoverable(user.settings.isDiscoverable);
+        setShowDistance(user.settings.showDistance);
+      }
+    } finally {
+      setSavingSettings(false);
+    }
+  }, [refreshProfile, user?.settings]);
+
+  const handleToggleDiscoverable = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const newValue = !isDiscoverable;
+    setIsDiscoverable(newValue);
+    saveSettings({ is_discoverable: newValue });
+  }, [isDiscoverable, saveSettings]);
+
+  const handleCycleDistance = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const currentIndex = DISTANCE_OPTIONS.indexOf(showDistance);
+    const nextIndex = (currentIndex + 1) % DISTANCE_OPTIONS.length;
+    const newValue = DISTANCE_OPTIONS[nextIndex];
+    setShowDistance(newValue);
+    saveSettings({ show_distance: newValue });
+  }, [showDistance, saveSettings]);
 
   const handleLogout = useCallback(() => {
     Alert.alert(
@@ -90,29 +152,35 @@ export const SettingsScreen: React.FC = () => {
     );
   }, [logout, clearUser]);
 
-  const handleDeleteAccount = useCallback(() => {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure you want to delete your account? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            clearUser();
-            logout();
-          },
-        },
-      ]
-    );
-  }, [logout, clearUser]);
-
-  const handleToggle = useCallback((setter: React.Dispatch<React.SetStateAction<boolean>>) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setter(prev => !prev);
+  const handleShare = useCallback(async () => {
+    try {
+      await Share.share({
+        message: 'Check out InBlood - Where Hearts Connect! Find your perfect match. Download now: https://play.google.com/store/apps/details?id=com.inblood.app',
+      });
+    } catch (error) {
+      // User cancelled or share failed silently
+    }
   }, []);
+
+  // TODO: Uncomment when backend DELETE /users/me endpoint is implemented
+  // const handleDeleteAccount = useCallback(() => {
+  //   Alert.alert(
+  //     'Delete Account',
+  //     'Are you sure you want to delete your account? This action cannot be undone.',
+  //     [
+  //       { text: 'Cancel', style: 'cancel' },
+  //       {
+  //         text: 'Delete',
+  //         style: 'destructive',
+  //         onPress: () => {
+  //           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  //           clearUser();
+  //           logout();
+  //         },
+  //       },
+  //     ]
+  //   );
+  // }, [logout, clearUser]);
 
   return (
     <View style={styles.container}>
@@ -123,7 +191,9 @@ export const SettingsScreen: React.FC = () => {
             <Ionicons name="chevron-back" size={28} color={colors.text} />
           </Pressable>
           <Text style={styles.headerTitle}>Settings</Text>
-          <View style={styles.backButton} />
+          <View style={styles.backButton}>
+            {savingSettings && <ActivityIndicator size="small" color={colors.primary} />}
+          </View>
         </Animated.View>
 
         <ScrollView
@@ -138,102 +208,76 @@ export const SettingsScreen: React.FC = () => {
                 icon="person-outline"
                 title="Edit Profile"
                 subtitle="Update your photos and info"
-                onPress={() => navigation.goBack()}
+                onPress={() => navigation.navigate('EditProfile')}
               />
+              {/* TODO: Needs backend endpoint — no change email API exists
               <SettingItem
                 icon="mail-outline"
                 title="Email"
                 subtitle="user@example.com"
                 onPress={() => Alert.alert('Change Email', 'Email change feature coming soon!')}
-              />
+              /> */}
+              {/* TODO: Needs backend endpoint — no phone field in User model
               <SettingItem
                 icon="call-outline"
                 title="Phone Number"
                 subtitle="+91 98765 43210"
                 onPress={() => Alert.alert('Change Phone', 'Phone number change feature coming soon!')}
-              />
-              <SettingItem
-                icon="lock-closed-outline"
-                title="Change Password"
-                onPress={() => Alert.alert('Change Password', 'Password change feature coming soon!')}
-              />
-            </View>
-          </Animated.View>
-
-          {/* Notifications Section */}
-          <Animated.View entering={FadeInUp.delay(200)} style={styles.section}>
-            <Text style={styles.sectionTitle}>Notifications</Text>
-            <View style={styles.sectionContent}>
-              <SettingItem
-                icon="notifications-outline"
-                title="Push Notifications"
-                subtitle="Get notified about new matches"
-                rightElement={
-                  <Switch
-                    value={notifications}
-                    onValueChange={() => handleToggle(setNotifications)}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor={colors.text}
-                  />
-                }
-              />
-              <SettingItem
-                icon="mail-outline"
-                title="Email Notifications"
-                subtitle="Receive updates via email"
-                rightElement={
-                  <Switch
-                    value={emailNotifications}
-                    onValueChange={() => handleToggle(setEmailNotifications)}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor={colors.text}
-                  />
-                }
-              />
+              /> */}
             </View>
           </Animated.View>
 
           {/* Privacy Section */}
-          <Animated.View entering={FadeInUp.delay(300)} style={styles.section}>
+          <Animated.View entering={FadeInUp.delay(200)} style={styles.section}>
             <Text style={styles.sectionTitle}>Privacy</Text>
             <View style={styles.sectionContent}>
               <SettingItem
-                icon="location-outline"
-                title="Show Distance"
-                subtitle="Let others see how far you are"
-                rightElement={
-                  <Switch
-                    value={showDistance}
-                    onValueChange={() => handleToggle(setShowDistance)}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor={colors.text}
-                  />
-                }
-              />
-              <SettingItem
-                icon="calendar-outline"
-                title="Show Age"
-                subtitle="Display your age on profile"
-                rightElement={
-                  <Switch
-                    value={showAge}
-                    onValueChange={() => handleToggle(setShowAge)}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor={colors.text}
-                  />
-                }
-              />
-              <SettingItem
                 icon="eye-off-outline"
                 title="Incognito Mode"
-                subtitle="Browse without being seen"
-                onPress={() => Alert.alert('Incognito Mode', 'Go invisible and browse profiles without being seen. Premium feature coming soon!')}
+                subtitle={isDiscoverable ? 'Your profile is visible' : 'Your profile is hidden'}
+                rightElement={
+                  <Switch
+                    value={!isDiscoverable}
+                    onValueChange={handleToggleDiscoverable}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor={colors.text}
+                  />
+                }
+              />
+              <SettingItem
+                icon="location-outline"
+                title="Show Distance"
+                subtitle={DISTANCE_LABELS[showDistance]}
+                onPress={handleCycleDistance}
+                rightElement={
+                  <View style={styles.distanceBadge}>
+                    <Text style={styles.distanceBadgeText}>
+                      {showDistance === 'exact' ? 'Exact' : showDistance === 'approximate' ? 'Approx' : 'Off'}
+                    </Text>
+                  </View>
+                }
               />
               <SettingItem
                 icon="ban-outline"
                 title="Blocked Users"
                 subtitle="Manage blocked accounts"
-                onPress={() => Alert.alert('Blocked Users', 'No blocked users yet.')}
+                onPress={() => navigation.navigate('BlockedUsers')}
+              />
+            </View>
+          </Animated.View>
+
+          {/* Notifications Section */}
+          <Animated.View entering={FadeInUp.delay(300)} style={styles.section}>
+            <Text style={styles.sectionTitle}>Notifications</Text>
+            <View style={styles.sectionContent}>
+              <SettingItem
+                icon="notifications-outline"
+                title="Push Notifications"
+                subtitle="Managed through device settings"
+                onPress={() => Alert.alert(
+                  'Push Notifications',
+                  'To manage push notifications, go to your device Settings > Apps > InBlood > Notifications.'
+                )}
               />
             </View>
           </Animated.View>
@@ -245,22 +289,18 @@ export const SettingsScreen: React.FC = () => {
               <SettingItem
                 icon="help-circle-outline"
                 title="Help Center"
-                onPress={() => Alert.alert('Help Center', 'Need help? Contact us at support@inblood.com')}
+                subtitle="Safety tips & contact support"
+                onPress={() => setShowSafetyModal(true)}
               />
               <SettingItem
                 icon="shield-checkmark-outline"
                 title="Safety Tips"
-                onPress={() => Alert.alert('Safety Tips', '1. Never share personal info\n2. Meet in public places\n3. Tell a friend about your date\n4. Trust your instincts')}
+                onPress={() => setShowSafetyModal(true)}
               />
               <SettingItem
                 icon="document-text-outline"
-                title="Terms of Service"
-                onPress={() => Alert.alert('Terms of Service', 'By using InBlood, you agree to our terms and conditions.')}
-              />
-              <SettingItem
-                icon="shield-outline"
-                title="Privacy Policy"
-                onPress={() => Alert.alert('Privacy Policy', 'Your privacy is important to us. We never share your data with third parties.')}
+                title="Terms & Privacy Policy"
+                onPress={() => setShowTermsModal(true)}
               />
             </View>
           </Animated.View>
@@ -272,7 +312,7 @@ export const SettingsScreen: React.FC = () => {
               <SettingItem
                 icon="information-circle-outline"
                 title="App Version"
-                subtitle="1.0.0"
+                subtitle={Constants.expoConfig?.version || '1.0.0'}
               />
               <SettingItem
                 icon="star-outline"
@@ -284,7 +324,7 @@ export const SettingsScreen: React.FC = () => {
                 icon="share-social-outline"
                 title="Share InBlood"
                 subtitle="Invite friends to join"
-                onPress={() => Alert.alert('Share InBlood', 'Share link: https://inblood.app/invite')}
+                onPress={handleShare}
               />
             </View>
           </Animated.View>
@@ -299,22 +339,26 @@ export const SettingsScreen: React.FC = () => {
                 onPress={handleLogout}
                 danger
               />
+              {/* TODO: Needs backend endpoint — no DELETE /users/me API exists
               <SettingItem
                 icon="trash-outline"
                 title="Delete Account"
                 subtitle="Permanently delete your account"
                 onPress={handleDeleteAccount}
                 danger
-              />
+              /> */}
             </View>
           </Animated.View>
 
           {/* Footer */}
           <Animated.View entering={FadeIn.delay(700)} style={styles.footer}>
-            <Text style={styles.footerText}>Made with ❤️ by InBlood Team</Text>
+            <Text style={styles.footerText}>Made with love by InBlood Team</Text>
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
+
+      <SafetyModal visible={showSafetyModal} onClose={() => setShowSafetyModal(false)} />
+      <TermsModal visible={showTermsModal} onClose={() => setShowTermsModal(false)} />
     </View>
   );
 };
@@ -403,6 +447,17 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  distanceBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(229, 57, 53, 0.15)',
+  },
+  distanceBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
   },
   footer: {
     alignItems: 'center',

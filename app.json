@@ -2,7 +2,7 @@
   "expo": {
     "name": "InBlood",
     "slug": "inblood",
-    "version": "1.0.0",
+    "version": "2.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.inblood.app"
+      "bundleIdentifier": "com.inblood.app",
+      "config": {
+        "googleMapsApiKey": "AIzaSyB6qyKSRUDCdU6Nl88Kg59JdvBr4nDrhJg"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +26,12 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.inblood.app"
+      "package": "com.inblood.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyB6qyKSRUDCdU6Nl88Kg59JdvBr4nDrhJg"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,7 +45,34 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.345043990448-d7t4lhjte5tqfh7249ovia2b6pbn0k90"
         }
+      ],
+      [
+        "react-native-maps",
+        {
+          "enableGoogleMapsOnAndroid": true,
+          "enableGoogleMapsOnIOS": true
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "env": "development",
+      "apiBaseUrl": "https://backend-cfh1.onrender.com/api/v1",
+      "apiTimeout": 30000,
+      "firebase": {
+        "apiKey": "AIzaSyC9fjn0aJ-bh-Tls-XLbk51M0oE9toQpoc",
+        "authDomain": "nice-ripple-456414-c0.firebaseapp.com",
+        "databaseURL": "https://nice-ripple-456414-c0-default-rtdb.asia-southeast1.firebasedatabase.app",
+        "projectId": "nice-ripple-456414-c0",
+        "storageBucket": "nice-ripple-456414-c0.firebasestorage.app",
+        "messagingSenderId": "345043990448",
+        "appId": "1:345043990448:web:9801e3f69ffa2f0606c875",
+        "measurementId": "G-P3YHSD9SX0"
+      },
+      "googleWebClientId": "your_google_client_id_here.apps.googleusercontent.com",
+      "eas": {
+        "projectId": "6c1d819c-6aa8-4c1e-ac83-4e44079c10e5"
+      }
+    },
+    "owner": "yatharthkaushal"
   }
 }

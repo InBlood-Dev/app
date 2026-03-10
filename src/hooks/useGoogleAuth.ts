@@ -93,6 +93,17 @@ export const useGoogleAuth = (): UseGoogleAuthReturn => {
       const currentUser = await GoogleSignin.getCurrentUser();
       console.log('[useGoogleAuth] Current user before signIn:', currentUser ? currentUser.user.email : 'none');
 
+      // Sign out any existing Google user to force account picker
+      if (currentUser) {
+        console.log('[useGoogleAuth] Signing out existing user to force account picker');
+        try {
+          await GoogleSignin.signOut();
+          console.log('[useGoogleAuth] Existing user signed out');
+        } catch (signOutError) {
+          console.warn('[useGoogleAuth] Failed to sign out existing user:', signOutError);
+        }
+      }
+
       // Check if user has Google Play Services
       console.log('[useGoogleAuth] Checking Play Services');
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });

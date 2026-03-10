@@ -1,0 +1,56 @@
+{
+  "project_info": {
+    "project_number": "345043990448",
+    "firebase_url": "https://nice-ripple-456414-c0-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "nice-ripple-456414-c0",
+    "storage_bucket": "nice-ripple-456414-c0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:345043990448:android:470dd71f5f655b9106c875",
+        "android_client_info": {
+          "package_name": "com.inblood.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "345043990448-d7t4lhjte5tqfh7249ovia2b6pbn0k90.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.inblood.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "345043990448-qqdie41532fv705o1iugnpg3jrpfj0pl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.inblood.app",
+            "certificate_hash": "23ec456c58853bb8a5c2897c923dbf96fc50c1f2"
+          }
+        },
+        {
+          "client_id": "345043990448-nq4lvsli9l33mot2o4r81051sq9e475g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgqcA8M7nkaf6X8YgAsktVXDB8_jXw1fc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "345043990448-nq4lvsli9l33mot2o4r81051sq9e475g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

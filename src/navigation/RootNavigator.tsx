@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, Theme } from '@react-navigation/native';
 import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
@@ -8,11 +8,14 @@ import { MatchScreen } from '../screens/home/MatchScreen';
 import { ChatScreen } from '../screens/chat/ChatScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { SettingsScreen } from '../screens/settings/SettingsScreen';
+import { BlockedUsersScreen } from '../screens/settings/BlockedUsersScreen';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
 import { RootStackParamList } from './types';
-import { useAuth } from '../context';
+import { useAuth, useMatches } from '../context';
 import { colors } from '../theme';
+import { MatchToast } from '../components/MatchToast';
+import { navigationRef } from '../utils/navigationRef';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -48,9 +51,27 @@ const navigationTheme: Theme = {
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, hasCompletedOnboarding, hasCompletedProfileSetup } = useAuth();
+  const { matchToast, dismissMatchToast } = useMatches();
+
+  const handleToastPress = useCallback(() => {
+    if (matchToast && navigationRef.isReady()) {
+      dismissMatchToast();
+      navigationRef.navigate('ChatScreen', {
+        matchId: matchToast.matchId,
+        conversationId: matchToast.conversationId,
+        profile: matchToast.profile,
+      });
+    }
+  }, [matchToast, dismissMatchToast]);
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
+      <MatchToast
+        visible={!!matchToast}
+        matchData={matchToast}
+        onDismiss={dismissMatchToast}
+        onPress={handleToastPress}
+      />
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -127,6 +148,14 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen
               name="Settings"
               component={SettingsScreen}
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+
+            <Stack.Screen
+              name="BlockedUsers"
+              component={BlockedUsersScreen}
               options={{
                 animation: 'slide_from_right',
               }}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,8 +8,9 @@ import {
   TextInput,
   Modal,
   Image,
+  FlatList,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -17,6 +18,9 @@ import Animated, {
   useAnimatedStyle,
   withDecay,
   cancelAnimation,
+  useDerivedValue,
+  useAnimatedReaction,
+  runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,13 +30,19 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import { Profile } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
-import { useUser } from '../../context';
+import { useExplore } from '../../context';
+import type { ExploreProfile } from '../../context/ExploreContext';
+import type { ExploreFilters } from '../../services/discovery.service';
+import { isUserOnline } from '../../utils/timeUtils';
+import { searchUsers } from '../../services/search.service';
+import type { SearchUser } from '../../services/search.service';
+import { useDebounce } from '../../hooks/useDebounce';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Grid configuration
 const NUM_COLUMNS = 3;
-const NUM_ROWS = 5;
+const MIN_ROWS = 5; // Minimum rows per tile (used during loading shimmer)
 const CARD_GAP = 8;
 const CARD_WIDTH = (SCREEN_WIDTH - spacing.md * 2 - CARD_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS;
 const CARD_HEIGHT = CARD_WIDTH * 1.4;
@@ -41,37 +51,15 @@ const CARD_HEIGHT = CARD_WIDTH * 1.4;
 const CELL_WIDTH = CARD_WIDTH + CARD_GAP;
 const CELL_HEIGHT = CARD_HEIGHT + CARD_GAP;
 
-// Total grid cycle dimensions
+// Horizontal cycle (fixed — always 3 columns)
 const GRID_CYCLE_WIDTH = CELL_WIDTH * NUM_COLUMNS;
-const GRID_CYCLE_HEIGHT = CELL_HEIGHT * NUM_ROWS;
 
-// Mock profiles - Indian photos (alternating female/male)
-const MOCK_PROFILE_IMAGES = [
-  'https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=400&h=600&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1594744803329-e58b31de8bf5?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1615109398623-88346a601842?w=400&h=600&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1611432579699-484f7990b127?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1583195764036-6dc248ac07d9?w=400&h=600&fit=crop', // Indian man
-  'https://images.unsplash.com/photo-1609505848912-b7c3b8b4beda?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=600&fit=crop', // Man
-  'https://images.unsplash.com/photo-1618151313441-bc79b11e5090?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop', // Man
-  'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=600&fit=crop', // Professional woman
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=600&fit=crop', // Man
-  'https://images.unsplash.com/photo-1596815064285-45ed8a9c0463?w=400&h=600&fit=crop', // Indian woman
-  'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=600&fit=crop', // Man
-  'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=600&fit=crop', // Woman
-];
-
-// Names matching image order (female/male alternating)
-const NAMES = [
-  'Priya', 'Arjun', 'Ananya', 'Rohan', 'Ishita', 'Vikram', 'Kavya', 'Aditya',
-  'Shreya', 'Karan', 'Riya', 'Siddharth', 'Meera', 'Dev', 'Tanvi', 'Rahul',
-  'Nisha', 'Varun', 'Pooja', 'Amit', 'Divya', 'Kabir', 'Neha', 'Dhruv',
-];
-
-const CITIES = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Pune', 'Jaipur', 'Hyderabad'];
+// Shimmer placeholder for loading cards
+const ShimmerCard: React.FC = () => (
+  <View style={[styles.card, styles.shimmerCard]}>
+    <View style={styles.shimmerContent} />
+  </View>
+);
 
 type RootStackParamList = {
   GalleryDiscover: undefined;
@@ -80,84 +68,66 @@ type RootStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-interface GalleryProfile {
-  id: string;
-  name: string;
-  age: number;
-  image: string;
-  city: string;
-  verified: boolean;
-  online: boolean;
-}
-
-// Generate profile for grid position with proper wrapping
-const getProfileForPosition = (col: number, row: number): GalleryProfile => {
-  // Use positive modulo for wrapping
-  const wrappedCol = ((col % NUM_COLUMNS) + NUM_COLUMNS) % NUM_COLUMNS;
-  const wrappedRow = ((row % NUM_ROWS) + NUM_ROWS) % NUM_ROWS;
-  const index = wrappedRow * NUM_COLUMNS + wrappedCol;
-
-  return {
-    id: `profile-${wrappedCol}-${wrappedRow}`,
-    name: NAMES[index % NAMES.length],
-    age: 18 + (index * 3 % 30),
-    image: MOCK_PROFILE_IMAGES[index % MOCK_PROFILE_IMAGES.length],
-    city: CITIES[index % CITIES.length],
-    verified: index % 3 === 0,
-    online: index % 2 === 0,
-  };
-};
+// Convert ExploreProfile to GalleryProfile format.
+// When activeFilter is set, use that filter's color for all profile borders.
+const convertToGalleryProfile = (profile: ExploreProfile, activeFilterColor?: string) => ({
+  id: profile.user_id,
+  name: profile.name,
+  age: profile.age,
+  image: profile.primary_photo,
+  city: '',
+  verified: false,
+  online: isUserOnline(profile.last_active_at),
+  borderColor: activeFilterColor || profile.relationship_types[0]?.border_color || '#FFFFFF',
+});
 
 // Relationship type options with unique colors
 export const RELATIONSHIP_TYPES = [
-  { id: 'long-term', label: 'Long-term', icon: 'heart', color: '#E53935' },
-  { id: 'casual', label: 'Casual', icon: 'cafe', color: '#8E24AA' },
-  { id: 'friendship', label: 'Friendship', icon: 'happy', color: '#43A047' },
-  { id: 'marriage', label: 'Marriage', icon: 'diamond', color: '#FB8C00' },
-  { id: 'open', label: 'Open to All', icon: 'sparkles', color: '#00ACC1' },
+  { id: 'long-term', label: 'Long-term', icon: 'heart', color: '#FF69B4' },
+  { id: 'casual', label: 'Casual', icon: 'cafe', color: '#FF6347' },
+  { id: 'friendship', label: 'Friendship', icon: 'happy', color: '#FFD700' },
+  { id: 'marriage', label: 'Marriage', icon: 'diamond', color: '#9370DB' },
+  { id: 'open', label: 'Open to All', icon: 'sparkles', color: '#32CD32' },
 ] as const;
 
 export type RelationshipType = typeof RELATIONSHIP_TYPES[number]['id'] | null;
 
 // Helper to get color for a relationship type
 export const getRelationshipColor = (typeId: RelationshipType): string => {
-  if (!typeId) return '#FFFFFF'; // default white when no filter
+  if (!typeId) return '#FFFFFF';
   const type = RELATIONSHIP_TYPES.find(t => t.id === typeId);
   return type?.color || '#FFFFFF';
 };
 
-// Filter Modal Component - Simple "Looking For" filter only
+// Relationship Type Filter Modal
 const FilterModal: React.FC<{
   visible: boolean;
   onClose: () => void;
-  selectedType: RelationshipType;
-  onSelectType: (type: RelationshipType) => void;
-}> = ({ visible, onClose, selectedType, onSelectType }) => {
-  const [tempType, setTempType] = useState<RelationshipType>(selectedType);
+  selectedTypes: string[];
+  onlineOnly: boolean;
+  onApply: (types: string[], onlineOnly: boolean) => void;
+}> = ({ visible, onClose, selectedTypes: currentTypes, onlineOnly: currentOnlineOnly, onApply }) => {
+  const [selected, setSelected] = useState<string[]>(currentTypes);
+  const [onlineFilter, setOnlineFilter] = useState(currentOnlineOnly);
 
   useEffect(() => {
-    setTempType(selectedType);
-  }, [selectedType, visible]);
+    if (visible) {
+      setSelected(currentTypes);
+      setOnlineFilter(currentOnlineOnly);
+    }
+  }, [visible, currentTypes, currentOnlineOnly]);
 
-  const selectType = (type: typeof RELATIONSHIP_TYPES[number]['id']) => {
+  const toggleType = (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setTempType(tempType === type ? null : type);
+    setSelected(prev =>
+      prev.includes(id) ? [] : [id]
+    );
   };
 
   const handleApply = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onSelectType(tempType);
+    onApply(selected, onlineFilter);
     onClose();
-  };
-
-  const handleClearAll = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setTempType(null);
-  };
-
-  const getTypeColor = (typeId: string) => {
-    const type = RELATIONSHIP_TYPES.find(t => t.id === typeId);
-    return type?.color || colors.primary;
   };
 
   return (
@@ -165,18 +135,47 @@ const FilterModal: React.FC<{
       <View style={filterStyles.overlay}>
         <View style={filterStyles.container}>
           <LinearGradient colors={['#1a1a1a', '#0d0d0d']} style={filterStyles.gradient}>
+            {/* Header */}
             <View style={filterStyles.header}>
-              <Text style={filterStyles.title}>Looking For</Text>
+              <Text style={filterStyles.title}>Filters</Text>
               <Pressable style={filterStyles.closeButton} onPress={onClose}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
 
-            <Text style={filterStyles.subtitle}>What type of relationship are you looking for?</Text>
+            {/* Online Only Toggle */}
+            <Pressable
+              style={[
+                filterStyles.onlineChip,
+                onlineFilter && filterStyles.onlineChipActive,
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setOnlineFilter(prev => !prev);
+              }}
+            >
+              <View style={[
+                filterStyles.onlineDot,
+                onlineFilter && filterStyles.onlineDotActive,
+              ]} />
+              <Text style={[
+                filterStyles.onlineChipText,
+                onlineFilter && filterStyles.onlineChipTextActive,
+              ]}>
+                Online Now
+              </Text>
+            </Pressable>
 
+            {/* Section label */}
+            <Text style={filterStyles.sectionLabel}>Looking For</Text>
+            <Text style={filterStyles.subtitle}>
+              Select none to show all
+            </Text>
+
+            {/* Relationship type options */}
             <View style={filterStyles.typesGrid}>
               {RELATIONSHIP_TYPES.map((type) => {
-                const isSelected = tempType === type.id;
+                const isSelected = selected.includes(type.id);
                 return (
                   <Pressable
                     key={type.id}
@@ -184,7 +183,7 @@ const FilterModal: React.FC<{
                       filterStyles.typeChip,
                       isSelected && { backgroundColor: type.color, borderColor: type.color },
                     ]}
-                    onPress={() => selectType(type.id)}
+                    onPress={() => toggleType(type.id)}
                   >
                     <Ionicons
                       name={type.icon as any}
@@ -205,20 +204,13 @@ const FilterModal: React.FC<{
               })}
             </View>
 
-            {tempType && (
-              <Pressable style={filterStyles.clearButton} onPress={handleClearAll}>
-                <Text style={filterStyles.clearButtonText}>Clear Filter</Text>
-              </Pressable>
-            )}
-
+            {/* Apply button */}
             <Pressable style={filterStyles.applyButton} onPress={handleApply}>
               <LinearGradient
-                colors={tempType ? [getTypeColor(tempType), getTypeColor(tempType)] : [colors.primary, colors.primaryDark]}
+                colors={[colors.primary, colors.primaryDark]}
                 style={filterStyles.applyGradient}
               >
-                <Text style={filterStyles.applyText}>
-                  Apply Filter
-                </Text>
+                <Text style={filterStyles.applyText}>Apply</Text>
               </LinearGradient>
             </Pressable>
           </LinearGradient>
@@ -228,19 +220,14 @@ const FilterModal: React.FC<{
   );
 };
 
-// Preload all images on mount
-const preloadImages = () => {
-  MOCK_PROFILE_IMAGES.forEach(uri => {
-    Image.prefetch(uri);
-  });
-};
-
 // Profile Card Component - simple rectangular design
 const ProfileCard: React.FC<{
-  profile: GalleryProfile;
+  profile: ReturnType<typeof convertToGalleryProfile>;
   onPress: () => void;
-  borderColor: string;
-}> = React.memo(({ profile, onPress, borderColor }) => {
+}> = React.memo(({ profile, onPress }) => {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
   return (
     <Pressable
       onPress={() => {
@@ -249,14 +236,31 @@ const ProfileCard: React.FC<{
       }}
       style={[
         styles.card,
-        { borderWidth: 2, borderColor },
+        { borderWidth: 2, borderColor: profile.borderColor },
       ]}
     >
-      <Image
-        source={{ uri: profile.image }}
-        style={styles.cardImage}
-        resizeMode="cover"
-      />
+      {/* Placeholder shown while loading or on error */}
+      {(!imageLoaded || imageError) && (
+        <View style={styles.imagePlaceholder}>
+          <Ionicons
+            name={imageError ? 'person' : 'image-outline'}
+            size={32}
+            color="rgba(255,255,255,0.2)"
+          />
+        </View>
+      )}
+
+      {!imageError && (
+        <Image
+          source={{ uri: profile.image }}
+          style={[styles.cardImage, !imageLoaded && styles.imageHidden]}
+          resizeMode="cover"
+          fadeDuration={0}
+          onLoad={() => setImageLoaded(true)}
+          onError={() => setImageError(true)}
+        />
+      )}
+
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
         locations={[0, 0.5, 1]}
@@ -275,7 +279,7 @@ const ProfileCard: React.FC<{
   );
 }, (prevProps, nextProps) =>
   prevProps.profile.id === nextProps.profile.id &&
-  prevProps.borderColor === nextProps.borderColor
+  prevProps.profile.borderColor === nextProps.profile.borderColor
 );
 
 // Helper function for proper modulo that handles negatives
@@ -285,26 +289,88 @@ const mod = (n: number, m: number): number => {
 };
 
 // Infinite 360 Grid Component - renders a tiled grid that wraps seamlessly
+//
+// How it works:
+// - A 3×3 grid of IDENTICAL tiles is rendered.
+// - Each tile contains numRows × 3 cards showing ALL profiles.
+// - The animated transform uses mod() to keep position within one cycle.
+// - Because every tile is an exact copy, when one tile scrolls off-screen
+//   and its neighbour takes its place the transition is perfectly seamless.
+// - The user scrolls through all profiles, then they repeat (infinite loop).
 const InfiniteGrid: React.FC<{
-  onProfilePress: (profile: GalleryProfile) => void;
-  filterColor: string;
-}> = ({ onProfilePress, filterColor }) => {
+  onProfilePress: (profile: ReturnType<typeof convertToGalleryProfile>) => void;
+  onlineOnly?: boolean;
+  activeFilterColor?: string;
+}> = ({ onProfilePress, onlineOnly = false, activeFilterColor }) => {
+  const { getProfileAt, updateCacheCenter, evictDistantRegions, profiles, isInitialLoading, generation } = useExplore();
+
+  // Client-side online filter: compute filtered profiles and a local lookup
+  const filteredProfiles = useMemo(() => {
+    if (!onlineOnly) return profiles;
+    return profiles.filter(p => isUserOnline(p.last_active_at));
+  }, [profiles, onlineOnly]);
+
+  const getFilteredProfileAt = useCallback((col: number, row: number): ExploreProfile | null => {
+    if (!onlineOnly) return getProfileAt(col, row);
+    if (filteredProfiles.length === 0) return null;
+    const normalizedCol = ((col % NUM_COLUMNS) + NUM_COLUMNS) % NUM_COLUMNS;
+    const totalRows = Math.ceil(filteredProfiles.length / NUM_COLUMNS);
+    const normalizedRow = ((row % totalRows) + totalRows) % totalRows;
+    const offset = (normalizedRow * NUM_COLUMNS + normalizedCol) % filteredProfiles.length;
+    return filteredProfiles[offset];
+  }, [onlineOnly, filteredProfiles, getProfileAt]);
+
+  // Each tile must show ALL profiles so that wrapping is seamless.
+  // numRows = total profile rows (ceil(profiles / 3)), capped to keep
+  // the total view count reasonable (numRows × 3 cols × 9 tiles).
+  const activeProfiles = onlineOnly ? filteredProfiles : profiles;
+  const numRows = useMemo(() => {
+    if (activeProfiles.length === 0) return MIN_ROWS;
+    const totalProfileRows = Math.ceil(activeProfiles.length / NUM_COLUMNS);
+    return Math.min(50, Math.max(totalProfileRows, MIN_ROWS));
+  }, [activeProfiles.length]);
+
+  // Dynamic vertical cycle = one full tile of all profiles
+  const cycleHeight = CELL_HEIGHT * numRows;
+  const cycleHeightSV = useSharedValue(cycleHeight);
+
+  useEffect(() => {
+    cycleHeightSV.value = cycleHeight;
+  }, [cycleHeight]);
+
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const contextX = useSharedValue(0);
   const contextY = useSharedValue(0);
 
-  // Pre-generate all profile data for the base grid
-  const baseProfiles = useMemo(() => {
-    const profiles: GalleryProfile[][] = [];
-    for (let row = 0; row < NUM_ROWS; row++) {
-      profiles[row] = [];
-      for (let col = 0; col < NUM_COLUMNS; col++) {
-        profiles[row][col] = getProfileForPosition(col, row);
+  // Re-center grid when generation changes (filter apply, retry, refresh)
+  useEffect(() => {
+    cancelAnimation(translateX);
+    cancelAnimation(translateY);
+    translateX.value = 0;
+    translateY.value = 0;
+    contextX.value = 0;
+    contextY.value = 0;
+  }, [generation]);
+
+  // Debounced handler for viewport updates (cache management)
+  const handleViewportMove = useCallback((row: number) => {
+    updateCacheCenter(0, row);
+    evictDistantRegions();
+  }, [updateCacheCenter, evictDistantRegions]);
+
+  const viewportRow = useDerivedValue(() => {
+    return Math.floor(-translateY.value / CELL_HEIGHT);
+  });
+
+  useAnimatedReaction(
+    () => viewportRow.value,
+    (current, previous) => {
+      if (previous !== null && Math.abs(current - previous) > 5) {
+        runOnJS(handleViewportMove)(current);
       }
     }
-    return profiles;
-  }, []);
+  );
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
@@ -322,61 +388,89 @@ const InfiniteGrid: React.FC<{
         velocity: event.velocityX,
         deceleration: 0.997,
       });
-
       translateY.value = withDecay({
         velocity: event.velocityY,
         deceleration: 0.997,
       });
     });
 
-  // Animated style for the entire grid container
+  // Animated grid transform — wraps within one cycle so numbers stay small
   const animatedGridStyle = useAnimatedStyle(() => {
-    // Keep translation within one cycle to prevent huge numbers
     const normX = mod(translateX.value, GRID_CYCLE_WIDTH);
-    const normY = mod(translateY.value, GRID_CYCLE_HEIGHT);
+    const normY = mod(translateY.value, cycleHeightSV.value);
 
     return {
       transform: [
         { translateX: normX - GRID_CYCLE_WIDTH },
-        { translateY: normY - GRID_CYCLE_HEIGHT },
+        { translateY: normY - cycleHeightSV.value },
       ],
     };
   });
 
-  // Render 3x3 grid tiles to ensure seamless wrapping in all directions
   const renderTiles = () => {
     const tiles: React.ReactElement[] = [];
 
+    // Shimmer during initial load
+    if (isInitialLoading) {
+      const shimmerCH = CELL_HEIGHT * MIN_ROWS;
+      for (let row = 0; row < MIN_ROWS; row++) {
+        for (let col = 0; col < NUM_COLUMNS; col++) {
+          tiles.push(
+            <View
+              key={`shimmer-${col}-${row}`}
+              style={[
+                styles.cardWrapper,
+                {
+                  left: GRID_CYCLE_WIDTH + col * CELL_WIDTH,
+                  top: shimmerCH + row * CELL_HEIGHT,
+                  width: CARD_WIDTH,
+                  height: CARD_HEIGHT,
+                },
+              ]}
+            >
+              <ShimmerCard />
+            </View>
+          );
+        }
+      }
+      return tiles;
+    }
+
+    if (activeProfiles.length === 0) return tiles;
+
+    // Render 3×3 IDENTICAL tiles for seamless wrapping.
+    // Every tile shows the exact same content (col, row) so when one
+    // tile scrolls off-screen and its neighbour replaces it, the
+    // transition is invisible.
     for (let tileRow = 0; tileRow < 3; tileRow++) {
       for (let tileCol = 0; tileCol < 3; tileCol++) {
         const tileOffsetX = tileCol * GRID_CYCLE_WIDTH;
-        const tileOffsetY = tileRow * GRID_CYCLE_HEIGHT;
+        const tileOffsetY = tileRow * cycleHeight;
 
-        // Render cards within this tile
-        for (let row = 0; row < NUM_ROWS; row++) {
+        for (let row = 0; row < numRows; row++) {
           for (let col = 0; col < NUM_COLUMNS; col++) {
-            const profile = baseProfiles[row][col];
             const x = tileOffsetX + col * CELL_WIDTH;
             const y = tileOffsetY + row * CELL_HEIGHT;
+
+            // Same (col, row) for every tile → identical content → seamless
+            const exploreProfile = getFilteredProfileAt(col, row);
 
             tiles.push(
               <View
                 key={`${tileCol}-${tileRow}-${col}-${row}`}
                 style={[
                   styles.cardWrapper,
-                  {
-                    left: x,
-                    top: y,
-                    width: CARD_WIDTH,
-                    height: CARD_HEIGHT,
-                  },
+                  { left: x, top: y, width: CARD_WIDTH, height: CARD_HEIGHT },
                 ]}
               >
-                <ProfileCard
-                  profile={profile}
-                  onPress={() => onProfilePress(profile)}
-                  borderColor={filterColor}
-                />
+                {exploreProfile ? (
+                  <ProfileCard
+                    profile={convertToGalleryProfile(exploreProfile, activeFilterColor)}
+                    onPress={() => onProfilePress(convertToGalleryProfile(exploreProfile, activeFilterColor))}
+                  />
+                ) : (
+                  <ShimmerCard />
+                )}
               </View>
             );
           }
@@ -389,7 +483,7 @@ const InfiniteGrid: React.FC<{
 
   return (
     <GestureDetector gesture={panGesture}>
-      <Animated.View style={[styles.gridContainer, animatedGridStyle]}>
+      <Animated.View style={[styles.gridContainer, { height: cycleHeight * 3 }, animatedGridStyle]}>
         {renderTiles()}
       </Animated.View>
     </GestureDetector>
@@ -398,17 +492,83 @@ const InfiniteGrid: React.FC<{
 
 export const GalleryDiscoverScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { selectedRelationshipType, setSelectedRelationshipType } = useUser();
+  const { applyFilters, isInitialLoading, error, profiles, filters } = useExplore();
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const debouncedSearchQuery = useDebounce(searchQuery, 500);
+  const insets = useSafeAreaInsets();
 
-  // Preload images on mount
+  // Track selected relationship types (empty = show all)
+  const [selectedRelTypes, setSelectedRelTypes] = useState<string[]>([]);
+  const [onlineOnly, setOnlineOnly] = useState(false);
+
+  // Fetch initial data on mount with no filters (show everything)
   useEffect(() => {
-    preloadImages();
+    if (profiles.length > 0) return;
+
+    console.log('[GalleryDiscoverScreen] Mounting, fetching all profiles');
+    applyFilters({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleProfilePress = useCallback((profile: GalleryProfile) => {
+  // Debug log state changes
+  useEffect(() => {
+    console.log(`[GalleryDiscoverScreen] State: isInitialLoading=${isInitialLoading}, profiles.length=${profiles.length}, error=${error}`);
+  }, [isInitialLoading, profiles.length, error]);
+
+  // Search users when debounced query changes
+  useEffect(() => {
+    const performSearch = async () => {
+      if (!debouncedSearchQuery || debouncedSearchQuery.trim().length === 0) {
+        setSearchResults([]);
+        setIsSearching(false);
+        return;
+      }
+      try {
+        setIsSearching(true);
+        const results = await searchUsers(debouncedSearchQuery.trim(), 20);
+        setSearchResults(results);
+      } catch (err) {
+        console.error('[GalleryDiscoverScreen] Search error:', err);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+    performSearch();
+  }, [debouncedSearchQuery]);
+
+  // Handle filter apply
+  const handleFilterApply = useCallback(async (types: string[], online: boolean) => {
+    console.log('[GalleryDiscoverScreen] handleFilterApply:', JSON.stringify(types), 'onlineOnly:', online);
+    setSelectedRelTypes(types);
+    setOnlineOnly(online);
+
+    const apiFilters: ExploreFilters = { relationship_type: types };
+    await applyFilters(apiFilters);
+  }, [applyFilters]);
+
+  const handleSearchUserPress = useCallback((user: SearchUser) => {
+    const fullProfile: Profile = {
+      id: user.user_id,
+      name: user.name,
+      age: user.age,
+      photos: [user.primary_photo],
+      bio: '',
+      location: { city: '', distance: user.distance ?? 0 },
+      interests: [],
+      verified: false,
+      gender: 'Woman',
+      interestedIn: ['Man'],
+      preferences: { ageRange: { min: 21, max: 35 }, maxDistance: 25 },
+    };
+    navigation.navigate('ProfileDetail', { profile: fullProfile });
+  }, [navigation]);
+
+  const handleProfilePress = useCallback((profile: ReturnType<typeof convertToGalleryProfile>) => {
     const fullProfile: Profile = {
       id: profile.id,
       name: profile.name,
@@ -418,12 +578,14 @@ export const GalleryDiscoverScreen: React.FC = () => {
       location: { city: profile.city, distance: Math.floor(Math.random() * 10) + 1 },
       interests: ['Travel', 'Music', 'Food'],
       verified: profile.verified,
-      gender: 'female',
-      interestedIn: ['male'],
+      gender: 'Woman',
+      interestedIn: ['Man'],
       preferences: { ageRange: { min: 21, max: 35 }, maxDistance: 25 },
     };
     navigation.navigate('ProfileDetail', { profile: fullProfile });
   }, [navigation]);
+
+  const hasActiveFilters = selectedRelTypes.length > 0 || onlineOnly;
 
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -431,13 +593,17 @@ export const GalleryDiscoverScreen: React.FC = () => {
         {/* Header */}
         <Animated.View entering={FadeInDown.delay(100)} style={styles.header}>
           <Pressable
-            style={styles.filterButton}
+            style={[
+              styles.filterButton,
+              hasActiveFilters && styles.filterButtonActive,
+            ]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setShowFilters(true);
             }}
           >
-            <Ionicons name="options-outline" size={22} color={colors.text} />
+            <Ionicons name="options-outline" size={22} color={hasActiveFilters ? colors.text : colors.text} />
+            {hasActiveFilters && <View style={styles.filterDot} />}
           </Pressable>
 
           <View style={styles.titleContainer}>
@@ -481,18 +647,114 @@ export const GalleryDiscoverScreen: React.FC = () => {
 
       {/* Infinite 360 Grid */}
       <View style={styles.gridWrapper}>
-        <InfiniteGrid
-          onProfilePress={handleProfilePress}
-          filterColor={getRelationshipColor(selectedRelationshipType)}
-        />
+        {/* Error state */}
+        {error && profiles.length === 0 && !isInitialLoading ? (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable
+              style={styles.retryButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                applyFilters(filters);
+              }}
+            >
+              <LinearGradient
+                colors={[colors.primary, colors.primaryDark]}
+                style={styles.retryGradient}
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Empty state - no profiles found */}
+        {!isInitialLoading && !error && profiles.length === 0 ? (
+          <View style={styles.errorContainer}>
+            <Ionicons name="people-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.errorText}>No profiles found</Text>
+            <Pressable
+              style={styles.retryButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                applyFilters(filters);
+              }}
+            >
+              <LinearGradient
+                colors={[colors.primary, colors.primaryDark]}
+                style={styles.retryGradient}
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Online filter empty state */}
+        {onlineOnly && !isInitialLoading && profiles.length > 0 && profiles.filter(p => isUserOnline(p.last_active_at)).length === 0 ? (
+          <View style={styles.errorContainer}>
+            <View style={styles.onlineEmptyDot} />
+            <Text style={styles.errorText}>No one is online right now</Text>
+            <Text style={styles.onlineEmptySubtext}>Check back in a bit</Text>
+          </View>
+        ) : (
+          <InfiniteGrid onProfilePress={handleProfilePress} onlineOnly={onlineOnly} activeFilterColor={selectedRelTypes[0] ? getRelationshipColor(selectedRelTypes[0] as RelationshipType) : undefined} />
+        )}
+
+        {/* Search Results Overlay */}
+        {showSearch && searchQuery.length > 0 && (
+          <View style={styles.searchResultsOverlay}>
+            {isSearching ? (
+              <View style={styles.searchLoadingContainer}>
+                <Text style={styles.searchLoadingText}>Searching...</Text>
+              </View>
+            ) : searchResults.length > 0 ? (
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item) => item.user_id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.searchResultsList}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={styles.searchResultItem}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handleSearchUserPress(item);
+                    }}
+                  >
+                    <Image
+                      source={{ uri: item.primary_photo }}
+                      style={styles.searchResultAvatar}
+                    />
+                    <View style={styles.searchResultInfo}>
+                      <Text style={styles.searchResultName}>{item.name}, {item.age}</Text>
+                      {item.distance !== null && (
+                        <Text style={styles.searchResultDistance}>{Math.round(item.distance)} km away</Text>
+                      )}
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </Pressable>
+                )}
+              />
+            ) : (
+              <View style={styles.searchEmptyContainer}>
+                <Ionicons name="search-outline" size={48} color={colors.textMuted} />
+                <Text style={styles.searchEmptyText}>No users found</Text>
+                <Text style={styles.searchEmptySubtext}>Try a different name</Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Filter Modal */}
       <FilterModal
         visible={showFilters}
         onClose={() => setShowFilters(false)}
-        selectedType={selectedRelationshipType}
-        onSelectType={setSelectedRelationshipType}
+        selectedTypes={selectedRelTypes}
+        onlineOnly={onlineOnly}
+        onApply={handleFilterApply}
       />
     </GestureHandlerRootView>
   );
@@ -505,7 +767,6 @@ const filterStyles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   container: {
-    maxHeight: '80%',
     borderTopLeftRadius: borderRadius.xxl,
     borderTopRightRadius: borderRadius.xxl,
     overflow: 'hidden',
@@ -518,7 +779,7 @@ const filterStyles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xs,
   },
   title: {
     fontSize: fontSize.xl,
@@ -533,58 +794,54 @@ const filterStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.semibold,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  genderButtons: {
+  onlineChip: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
-  },
-  genderButton: {
-    flex: 1,
-    flexDirection: 'row',
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     backgroundColor: colors.card,
     borderRadius: borderRadius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 2,
     borderColor: colors.border,
-    overflow: 'hidden',
+    marginBottom: spacing.lg,
   },
-  genderButtonActive: {
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
+  onlineChipActive: {
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderColor: '#4CAF50',
   },
-  rainbowButton: {
-    width: '100%',
-    paddingVertical: spacing.sm + 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+  onlineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.textMuted,
   },
-  genderButtonText: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
+  onlineDotActive: {
+    backgroundColor: '#4CAF50',
   },
-  genderButtonTextActive: {
-    color: colors.text,
+  onlineChipText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+  },
+  onlineChipTextActive: {
+    color: '#4CAF50',
+  },
+  sectionLabel: {
+    fontSize: fontSize.md,
     fontWeight: fontWeight.bold,
+    color: colors.text,
+    marginBottom: spacing.xs,
   },
   subtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginBottom: spacing.lg,
   },
   typesGrid: {
     flexDirection: 'column',
     gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   typeChip: {
     flexDirection: 'row',
@@ -597,140 +854,15 @@ const filterStyles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.border,
   },
-  typeChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
   typeChipText: {
     fontSize: fontSize.md,
     color: colors.textMuted,
     fontWeight: fontWeight.semibold,
   },
-  typeChipTextActive: {
-    color: colors.text,
-    fontWeight: fontWeight.bold,
-  },
-  scrollContent: {
-    maxHeight: 400,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  rangeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-  },
-  rangeInputWrapper: {
-    alignItems: 'center',
-  },
-  rangeLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  rangeInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  rangeButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rangeValue: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
-    color: colors.text,
-    minWidth: 40,
-    textAlign: 'center',
-  },
-  rangeSeparator: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-  },
-  distanceValue: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.bold,
-    color: colors.primary,
-  },
-  distanceControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  distanceButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.card,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  distanceBar: {
-    flex: 1,
-    height: 8,
-    backgroundColor: colors.card,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  distanceFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-  },
-  interestsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  interestChip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  interestChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  interestChipText: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  interestChipTextActive: {
-    color: colors.text,
-    fontWeight: fontWeight.semibold,
-  },
-  clearButton: {
-    alignSelf: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  clearButtonText: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    textDecorationLine: 'underline',
-  },
   applyButton: {
     borderRadius: borderRadius.xl,
     overflow: 'hidden',
-    marginTop: spacing.md,
+    marginTop: spacing.xs,
   },
   applyGradient: {
     paddingVertical: spacing.md + 2,
@@ -774,6 +906,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  filterButtonActive: {
+    backgroundColor: 'rgba(229, 57, 53, 0.2)',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  filterDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
   searchButton: {
     width: 44,
     height: 44,
@@ -807,7 +953,7 @@ const styles = StyleSheet.create({
   gridContainer: {
     position: 'absolute',
     width: GRID_CYCLE_WIDTH * 3,
-    height: GRID_CYCLE_HEIGHT * 3,
+    // height is set dynamically via inline style (cycleHeight * 3)
   },
   cardWrapper: {
     position: 'absolute',
@@ -820,8 +966,18 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardImage: {
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
+  },
+  imageHidden: {
+    opacity: 0,
+  },
+  imagePlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   cardGradient: {
     position: 'absolute',
@@ -855,6 +1011,116 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
+  },
+  shimmerCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  shimmerContent: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  errorContainer: {
+    position: 'absolute',
+    top: '40%',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 100,
+    paddingHorizontal: spacing.xl,
+  },
+  onlineEmptyDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.textMuted,
+    marginBottom: spacing.xs,
+  },
+  onlineEmptySubtext: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: fontSize.md,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  retryButton: {
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+  },
+  retryGradient: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
+  retryText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.bold,
+    color: colors.text,
+  },
+  searchResultsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.background,
+    zIndex: 10,
+  },
+  searchLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchLoadingText: {
+    color: colors.textMuted,
+    fontSize: fontSize.md,
+  },
+  searchResultsList: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  searchResultAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.background,
+  },
+  searchResultInfo: {
+    marginLeft: spacing.md,
+    flex: 1,
+  },
+  searchResultName: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+  },
+  searchResultDistance: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  searchEmptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  searchEmptyText: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+  },
+  searchEmptySubtext: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
   },
 });
 

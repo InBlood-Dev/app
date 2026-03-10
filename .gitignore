@@ -32,6 +32,11 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env.development
+.env.staging
+.env.production
+# Keep .env.example for documentation
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +44,4 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+"felogs.md" 

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useAnimatedStyle,
@@ -103,6 +104,7 @@ const CenterTabIcon: React.FC<{ focused: boolean }> = ({ focused }) => {
 export const MainTabNavigator: React.FC = () => {
   const { matches } = useMatches();
   const [isDarkTheme, setIsDarkTheme] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // Count unread matches
   const unreadCount = matches.filter(m => m.unreadCount > 0).length;
@@ -110,11 +112,13 @@ export const MainTabNavigator: React.FC = () => {
   return (
     <TabBarThemeContext.Provider value={{ isDark: isDarkTheme, setIsDark: setIsDarkTheme }}>
       <Tab.Navigator
+        initialRouteName="Discover"
         screenOptions={{
           headerShown: false,
           tabBarStyle: [
             styles.tabBar,
             isDarkTheme ? styles.tabBarDark : styles.tabBarLight,
+            { bottom: 16 + insets.bottom },
           ],
           tabBarShowLabel: false,
           tabBarActiveTintColor: colors.primary,

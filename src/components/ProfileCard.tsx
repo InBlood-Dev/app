@@ -131,17 +131,39 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             </Text>
           )}
 
-          {/* Interests */}
-          {showFullInfo && profile.interests.length > 0 && (
+          {/* Tags and Relationship Types */}
+          {showFullInfo && (
             <View style={styles.interests}>
-              {profile.interests.slice(0, 4).map((interest, index) => (
-                <View key={index} style={styles.interestPill}>
-                  <Text style={styles.interestText}>{interest}</Text>
+              {/* Show relationship types first (with colored borders) */}
+              {profile.relationshipTypes && profile.relationshipTypes.slice(0, 2).map((relType, index) => (
+                <View
+                  key={`rel-${index}`}
+                  style={[
+                    styles.interestPill,
+                    {
+                      borderWidth: 1.5,
+                      borderColor: relType.border_color,
+                      backgroundColor: `${relType.border_color}20`,
+                    }
+                  ]}
+                >
+                  <Text style={[styles.interestText, { color: relType.border_color }]}>
+                    {relType.type}
+                  </Text>
                 </View>
               ))}
-              {profile.interests.length > 4 && (
+
+              {/* Show tags */}
+              {profile.tags && profile.tags.slice(0, 3).map((tag, index) => (
+                <View key={`tag-${index}`} style={styles.interestPill}>
+                  <Text style={styles.interestText}>{tag}</Text>
+                </View>
+              ))}
+
+              {/* Show "+N more" if there are additional tags */}
+              {profile.tags && profile.tags.length > 3 && (
                 <View style={styles.moreInterests}>
-                  <Text style={styles.moreInterestsText}>+{profile.interests.length - 4}</Text>
+                  <Text style={styles.moreInterestsText}>+{profile.tags.length - 3}</Text>
                 </View>
               )}
             </View>
