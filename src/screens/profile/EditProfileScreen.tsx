@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -27,6 +27,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import { AnimatedButton, AnimatedInput } from '../../components';
+import { DualThumbSlider } from '../../components/DualThumbSlider';
+import { ImageCropModal } from '../../components/ImageCropModal';
 import { useUser } from '../../context';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 
@@ -115,6 +117,7 @@ export const EditProfileScreen: React.FC = () => {
     fetchAvailableTags,
     isLoading: contextLoading,
     error: contextError,
+    submitVerification,
   } = useUser();
 
   // Form state initialized with user data
@@ -134,6 +137,11 @@ export const EditProfileScreen: React.FC = () => {
   // Photo options modal state
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [photoOptionsIndex, setPhotoOptionsIndex] = useState(0);
+
+  // Crop modal state
+  const [cropImageUri, setCropImageUri] = useState<string | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const cropCallbackRef = useRef<((uri: string) => void) | null>(null);
 
   // Modal states
   const [showPromptModal, setShowPromptModal] = useState(false);
@@ -270,26 +278,35 @@ export const EditProfileScreen: React.FC = () => {
   const handleAddPhoto = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsEditing: false,
       allowsMultipleSelection: false,
-      aspect: [3, 4],
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setPhotoUploading(true);
-      const isPrimary = photos.length === 0;
-      const success = await uploadPhotoToBackend(result.assets[0].uri, isPrimary);
-      setPhotoUploading(false);
+      setCropImageUri(result.assets[0].uri);
+      cropCallbackRef.current = async (croppedUri: string) => {
+        setShowCropModal(false);
+        setCropImageUri(null);
+        cropCallbackRef.current = null;
+        setPhotoUploading(true);
+        const isPrimary = photos.length === 0;
+        const success = await uploadPhotoToBackend(croppedUri, isPrimary);
+        setPhotoUploading(false);
 
-      if (success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Alert.alert('Upload Failed', contextError || 'Failed to upload photo. Please try again.');
-      }
+        if (success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          submitVerification(croppedUri).catch((err: any) =>
+            console.error('[EditProfile] Verification failed after add:', err?.message || err)
+          );
+        } else {
+          Alert.alert('Upload Failed', contextError || 'Failed to upload photo. Please try again.');
+        }
+      };
+      setShowCropModal(true);
     }
-  }, [photos.length, uploadPhotoToBackend, contextError]);
+  }, [photos.length, uploadPhotoToBackend, submitVerification, contextError]);
 
   // Replace an existing photo (atomic: keeps position & primary status)
   const handleReplacePhoto = useCallback(async (index: number) => {
@@ -298,25 +315,35 @@ export const EditProfileScreen: React.FC = () => {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsEditing: false,
       allowsMultipleSelection: false,
-      aspect: [3, 4],
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setPhotoUploading(true);
-      const success = await replacePhotoInBackend(meta.id, result.assets[0].uri);
-      setPhotoUploading(false);
+      const photoId = meta.id;
+      setCropImageUri(result.assets[0].uri);
+      cropCallbackRef.current = async (croppedUri: string) => {
+        setShowCropModal(false);
+        setCropImageUri(null);
+        cropCallbackRef.current = null;
+        setPhotoUploading(true);
+        const success = await replacePhotoInBackend(photoId, croppedUri);
+        setPhotoUploading(false);
 
-      if (success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Alert.alert('Replace Failed', contextError || 'Failed to replace photo. Please try again.');
-      }
+        if (success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          submitVerification(croppedUri).catch((err: any) =>
+            console.error('[EditProfile] Verification failed after replace:', err?.message || err)
+          );
+        } else {
+          Alert.alert('Replace Failed', contextError || 'Failed to replace photo. Please try again.');
+        }
+      };
+      setShowCropModal(true);
     }
-  }, [user?.photoMeta, replacePhotoInBackend, contextError]);
+  }, [user?.photoMeta, replacePhotoInBackend, submitVerification, contextError]);
 
   const handleRemovePhoto = useCallback(async (index: number) => {
     if (photos.length <= 1) {
@@ -1301,33 +1328,29 @@ export const EditProfileScreen: React.FC = () => {
 
             <View style={styles.preferenceItem}>
               <View style={styles.preferenceHeader}>
-                <Text style={styles.preferenceLabel}>Age Range</Text>
+                <Text style={styles.preferenceLabel}>Age</Text>
                 <Text style={styles.preferenceValue}>
                   {ageRange.min} - {ageRange.max}
                 </Text>
               </View>
-              <View style={styles.sliderRow}>
-                <Text style={styles.sliderLabel}>{ageRange.min}</Text>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={18}
-                  maximumValue={99}
-                  step={1}
-                  value={ageRange.max}
-                  onValueChange={(value) => setAgeRange(prev => ({ ...prev, max: Math.round(value) }))}
-                  minimumTrackTintColor={colors.primary}
-                  maximumTrackTintColor={colors.border}
-                  thumbTintColor={colors.primary}
-                />
-                <Text style={styles.sliderLabel}>{ageRange.max}</Text>
-              </View>
+              <DualThumbSlider
+                min={18}
+                max={100}
+                low={ageRange.min}
+                high={ageRange.max}
+                step={1}
+                onValueChange={(lo, hi) => setAgeRange({ min: lo, max: hi })}
+              />
             </View>
 
             <View style={styles.preferenceItem}>
               <View style={styles.preferenceHeader}>
-                <Text style={styles.preferenceLabel}>Maximum Distance</Text>
+                <Text style={styles.preferenceLabel}>Map Distance</Text>
                 <Text style={styles.preferenceValue}>{maxDistance} km</Text>
               </View>
+              <Text style={styles.preferenceSubtitle}>
+                Suggests nearby profiles for your matches
+              </Text>
               <Slider
                 style={styles.distanceSlider}
                 minimumValue={1}
@@ -1363,6 +1386,20 @@ export const EditProfileScreen: React.FC = () => {
       {renderOrientationModal()}
       {renderPronounsModal()}
       {renderTagsModal()}
+
+      {cropImageUri && (
+        <ImageCropModal
+          visible={showCropModal}
+          imageUri={cropImageUri}
+          aspectRatio={[3, 4]}
+          onCropComplete={(uri) => cropCallbackRef.current?.(uri)}
+          onCancel={() => {
+            setShowCropModal(false);
+            setCropImageUri(null);
+            cropCallbackRef.current = null;
+          }}
+        />
+      )}
     </View>
   );
 };
@@ -1735,6 +1772,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.primary,
     fontWeight: fontWeight.semibold,
+  },
+  preferenceSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+    marginBottom: spacing.sm,
   },
   sliderRow: {
     flexDirection: 'row',

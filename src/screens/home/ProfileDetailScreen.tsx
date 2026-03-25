@@ -31,9 +31,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ActionButton, InterestChip } from '../../components';
+import { ActionButton, InterestChip, ReportModal } from '../../components';
 import { useMatches, useUser } from '../../context';
 import { trackProfileView, createOrGetConversation } from '../../services/interactions.service';
+import { blockUser } from '../../services/blocking.service';
 import { Profile, SwipeDirection } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius, shadows } from '../../theme';
 
@@ -361,6 +362,8 @@ export const ProfileDetailScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Lazy load full profile if only partial data was passed
   React.useEffect(() => {
@@ -430,9 +433,46 @@ export const ProfileDetailScreen: React.FC = () => {
     }
   }, [profile, navigation, isChatLoading]);
 
+  const handleBlockUser = useCallback(() => {
+    setShowMenuModal(false);
+    Alert.alert(
+      'Block User',
+      `Are you sure you want to block ${profile.name}? They won't be able to contact you.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(profile.id);
+              navigation.goBack();
+            } catch {
+              Alert.alert('Error', 'Failed to block user.');
+            }
+          },
+        },
+      ]
+    );
+  }, [profile.id, profile.name, navigation]);
+
+  const handleReportUser = useCallback(() => {
+    setShowMenuModal(false);
+    setTimeout(() => setShowReportModal(true), 350);
+  }, []);
+
   return (
     <View style={styles.container}>
-      {/* Close button */}
+      {/* Header buttons */}
+      <Pressable
+        style={[styles.menuButton, { top: insets.top - 30 }]}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setShowMenuModal(true);
+        }}
+      >
+        <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
+      </Pressable>
       <Pressable
         style={[styles.closeButton, { top: insets.top - 30 }]}
         onPress={() => navigation.goBack()}
@@ -487,7 +527,13 @@ export const ProfileDetailScreen: React.FC = () => {
 
             {/* Center Profile Image (overlapping) */}
             <View style={styles.profileImageContainer}>
-              <Image source={{ uri: profile.photos[0] }} style={styles.statsProfileImage} />
+              {profile.photos[0] ? (
+                <Image source={{ uri: profile.photos[0] }} style={styles.statsProfileImage} />
+              ) : (
+                <View style={[styles.statsProfileImage, { backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }]}>
+                  <Ionicons name="person" size={36} color={colors.textMuted} />
+                </View>
+              )}
               <View style={styles.profileImageBorder} />
             </View>
           </View>
@@ -607,6 +653,56 @@ export const ProfileDetailScreen: React.FC = () => {
           setShowPhotoViewer(true);
         }}
       />
+
+      {/* Menu Modal */}
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuModal(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowMenuModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{profile.name}</Text>
+              <Pressable style={styles.modalCloseBtn} onPress={() => setShowMenuModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+            <View style={styles.modalDivider} />
+
+            <Pressable
+              style={styles.modalOption}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                handleBlockUser();
+              }}
+            >
+              <Ionicons name="ban" size={22} color={colors.error} />
+              <Text style={[styles.modalOptionText, { color: colors.error }]}>Block User</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.modalOption}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                handleReportUser();
+              }}
+            >
+              <Ionicons name="flag" size={22} color={colors.warning} />
+              <Text style={[styles.modalOptionText, { color: colors.warning }]}>Report User</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Report Modal */}
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        reportedUserId={profile.id}
+        reportedUserName={profile.name}
+      />
     </View>
   );
 };
@@ -626,6 +722,64 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+  },
+  menuButton: {
+    position: 'absolute',
+    left: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  modalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+  },
+  modalOptionText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.medium,
+    color: colors.text,
   },
   actionBar: {
     position: 'absolute',

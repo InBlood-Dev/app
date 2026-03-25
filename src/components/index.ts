@@ -11,3 +11,5 @@ export { MatchCard, NewMatchBubble } from './MatchCard';
 export { NotificationPermissionModal } from './modals/NotificationPermissionModal';
 export { MatchToast } from './MatchToast';
 export { OpeningMoveCard } from './OpeningMoveCard';
+export { DefaultAvatar } from './DefaultAvatar';
+export { ReportModal } from './modals/ReportModal';

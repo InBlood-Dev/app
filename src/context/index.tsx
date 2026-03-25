@@ -7,6 +7,7 @@ import { StoriesProvider } from './StoriesContext';
 import { LocationProvider } from './LocationContext';
 import { ExploreProvider } from './ExploreContext';
 import { setAuthToken, setOnUnauthorized } from '../services/api';
+import { identifyUser, resetAnalytics } from '../lib/analytics';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -16,7 +17,7 @@ interface AppProvidersProps {
  * Inner component to sync auth token with API client
  */
 const ApiTokenSync: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { accessToken, logout } = useAuth();
+  const { accessToken, logout, userId } = useAuth();
 
   useEffect(() => {
     // Set the auth token for API requests
@@ -31,6 +32,15 @@ const ApiTokenSync: React.FC<{ children: ReactNode }> = ({ children }) => {
       logout();
     });
   }, [logout]);
+
+  // Identify user in analytics when authenticated, reset on logout
+  useEffect(() => {
+    if (userId) {
+      identifyUser(userId);
+    } else {
+      resetAnalytics();
+    }
+  }, [userId]);
 
   return <>{children}</>;
 };

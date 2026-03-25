@@ -11,6 +11,7 @@ import {
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { API_BASE_URL } from "../../config/api.config";
 import Animated, {
   FadeIn,
@@ -21,6 +22,7 @@ import Animated, {
   Layout,
   SlideInRight,
   SlideOutLeft,
+  useAnimatedStyle,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
@@ -34,6 +36,8 @@ import {
   ProgressBar,
   InterestChip,
 } from "../../components";
+import { DualThumbSlider } from "../../components/DualThumbSlider";
+import { ImageCropModal } from "../../components/ImageCropModal";
 import { useUser, useAuth, useLocation } from "../../context";
 import {
   colors,
@@ -115,6 +119,7 @@ export const ProfileSetupScreen: React.FC = () => {
     addTag,
     fetchProfile,
     user,
+    submitVerification,
   } = useUser();
   const { completeProfileSetup, email, googleUserId, accessToken } = useAuth();
   const { userLocation, requestPermission } = useLocation();
@@ -136,6 +141,14 @@ export const ProfileSetupScreen: React.FC = () => {
   const [locationRequesting, setLocationRequesting] = useState(false);
   const [ageRange, setAgeRange] = useState({ min: 21, max: 35 });
   const [maxDistance, setMaxDistance] = useState(25);
+  const [cropImageUri, setCropImageUri] = useState<string | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+
+  // Keyboard animation — animated spacer pushes footer above keyboard
+  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+  const keyboardSpacerStyle = useAnimatedStyle(() => ({
+    height: Math.abs(keyboardHeight.value),
+  }));
 
   const currentStepIndex = useMemo(
     () => STEPS.indexOf(currentStep),
@@ -173,7 +186,7 @@ export const ProfileSetupScreen: React.FC = () => {
       case "photos":
         return photos.length >= 1;
       case "bio":
-        return bio.length >= 10;
+        return bio.length === 0 || bio.length >= 3;
       case "tags":
         return selectedTags.length >= 3;
       case "location":
@@ -312,6 +325,13 @@ export const ProfileSetupScreen: React.FC = () => {
         }
 
         console.log("[ProfileSetupScreen] All photos uploaded successfully");
+
+        // Submit primary photo for verification (fire-and-forget)
+        console.log("[ProfileSetupScreen] Submitting primary photo for verification");
+        submitVerification(photos[0]).catch((err) =>
+          console.warn("[ProfileSetupScreen] Verification submission failed:", err)
+        );
+
         console.log("-".repeat(6));
 
         // Step 2: Save profile data
@@ -506,6 +526,7 @@ export const ProfileSetupScreen: React.FC = () => {
     googleUserId,
     accessToken,
     uploadPhoto,
+    submitVerification,
     addTag,
     fetchProfile,
     userLocation,
@@ -523,16 +544,27 @@ export const ProfileSetupScreen: React.FC = () => {
   const handlePickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsEditing: true,
+      allowsEditing: false,
       allowsMultipleSelection: false,
-      aspect: [3, 4],
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setPhotos((prev) => [...prev, result.assets[0].uri]);
+      setCropImageUri(result.assets[0].uri);
+      setShowCropModal(true);
     }
+  }, []);
+
+  const handleCropComplete = useCallback((croppedUri: string) => {
+    setPhotos((prev) => [...prev, croppedUri]);
+    setShowCropModal(false);
+    setCropImageUri(null);
+  }, []);
+
+  const handleCropCancel = useCallback(() => {
+    setShowCropModal(false);
+    setCropImageUri(null);
   }, []);
 
   const handleRemovePhoto = useCallback((index: number) => {
@@ -862,7 +894,7 @@ export const ProfileSetupScreen: React.FC = () => {
           >
             <Text style={styles.stepTitle}>Write your bio</Text>
             <Text style={styles.stepSubtitle}>
-              Let others know what makes you unique
+              Optional — let others know what makes you unique
             </Text>
 
             <AnimatedInput
@@ -1009,35 +1041,29 @@ export const ProfileSetupScreen: React.FC = () => {
 
             <View style={styles.preferenceSection}>
               <View style={styles.preferenceHeader}>
-                <Text style={styles.preferenceLabel}>Age Range</Text>
+                <Text style={styles.preferenceLabel}>Age</Text>
                 <Text style={styles.preferenceValue}>
                   {ageRange.min} - {ageRange.max}
                 </Text>
               </View>
-              <View style={styles.sliderContainer}>
-                <Text style={styles.sliderLabel}>{ageRange.min}</Text>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={18}
-                  maximumValue={99}
-                  step={1}
-                  value={ageRange.max}
-                  onValueChange={(value) =>
-                    setAgeRange((prev) => ({ ...prev, max: value }))
-                  }
-                  minimumTrackTintColor={colors.primary}
-                  maximumTrackTintColor={colors.border}
-                  thumbTintColor={colors.primary}
-                />
-                <Text style={styles.sliderLabel}>{ageRange.max}</Text>
-              </View>
+              <DualThumbSlider
+                min={18}
+                max={100}
+                low={ageRange.min}
+                high={ageRange.max}
+                step={1}
+                onValueChange={(lo, hi) => setAgeRange({ min: lo, max: hi })}
+              />
             </View>
 
             <View style={styles.preferenceSection}>
               <View style={styles.preferenceHeader}>
-                <Text style={styles.preferenceLabel}>Maximum Distance</Text>
+                <Text style={styles.preferenceLabel}>Map Distance</Text>
                 <Text style={styles.preferenceValue}>{maxDistance} km</Text>
               </View>
+              <Text style={styles.preferenceSubtitle}>
+                Suggests nearby profiles for your matches
+              </Text>
               <Slider
                 style={styles.distanceSlider}
                 minimumValue={1}
@@ -1096,7 +1122,20 @@ export const ProfileSetupScreen: React.FC = () => {
             size="large"
           />
         </View>
+
+        {/* Animated spacer — grows to keyboard height, pushing footer up */}
+        <Animated.View style={keyboardSpacerStyle} />
       </SafeAreaView>
+
+      {cropImageUri && (
+        <ImageCropModal
+          visible={showCropModal}
+          imageUri={cropImageUri}
+          aspectRatio={[3, 4]}
+          onCropComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
     </View>
   );
 };
@@ -1393,6 +1432,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.primary,
     fontWeight: fontWeight.semibold,
+  },
+  preferenceSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+    marginBottom: spacing.sm,
   },
   sliderContainer: {
     flexDirection: "row",

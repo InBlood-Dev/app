@@ -41,6 +41,7 @@ import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { startPayment, getPlans, getSubscriptionStatus, cancelSubscription } from '../../services/payment.service';
 import { SafetyModal } from '../../components/modals/SafetyModal';
+import { DefaultAvatar } from '../../components';
 import type { PlanType, SubscriptionPlan, SubscriptionStatusResponse } from '../../types';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -463,7 +464,7 @@ const BentoBox: React.FC<{
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { user, isLoading, refreshProfile, isRefreshing, error, clearError } = useUser();
+  const { user, isLoading, refreshProfile, isRefreshing, error, clearError, checkVerificationStatus } = useUser();
   const { matches, refreshPremiumStatus } = useMatches();
   const { logout } = useAuth();
   const { signOut: googleSignOut } = useGoogleAuth();
@@ -500,7 +501,8 @@ export const ProfileScreen: React.FC = () => {
 
   useEffect(() => {
     fetchSubscriptionInfo();
-  }, [fetchSubscriptionInfo]);
+    checkVerificationStatus();
+  }, [fetchSubscriptionInfo, checkVerificationStatus]);
 
   const handleCancelSubscription = useCallback(() => {
     Alert.alert(
@@ -683,19 +685,21 @@ export const ProfileScreen: React.FC = () => {
             </View>
 
             {/* Center Profile Image (overlapping) */}
-            {user?.photos?.[0] && (
-              <Pressable
-                style={styles.profileImageContainer}
-                onPress={() => handlePhotoPress(0)}
-              >
-                <RedBorder size={116} borderWidth={3}>
+            <Pressable
+              style={styles.profileImageContainer}
+              onPress={() => user?.photos?.[0] && handlePhotoPress(0)}
+            >
+              <RedBorder size={116} borderWidth={3}>
+                {user?.photos?.[0] ? (
                   <Image
                     source={{ uri: user.photos[0] }}
                     style={styles.statsProfileImage}
                   />
-                </RedBorder>
-              </Pressable>
-            )}
+                ) : (
+                  <DefaultAvatar size={110} />
+                )}
+              </RedBorder>
+            </Pressable>
           </View>
 
           {/* Name and details below */}
@@ -895,7 +899,7 @@ export const ProfileScreen: React.FC = () => {
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                   <Ionicons name="diamond" size={20} color="#FFD700" />
                   <Text style={[styles.premiumTitle, { marginLeft: 8, color: '#FFD700' }]}>
-                    {subscriptionInfo.subscription.plan_type === 'annual' ? 'Premium+' : 'Premium'}
+                    {subscriptionInfo.subscription.plan_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                   </Text>
                   <View style={{
                     backgroundColor: subscriptionInfo.subscription.status === 'active' ? 'rgba(76,175,80,0.2)' : 'rgba(255,152,0,0.2)',

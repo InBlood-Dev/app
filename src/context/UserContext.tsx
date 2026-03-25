@@ -718,27 +718,26 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    * Submit verification request
    */
   const submitVerification = useCallback(async (photoUri: string): Promise<boolean> => {
-    console.log('[UserContext] Submitting verification');
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    console.log('[UserContext] submitVerification called, photoUri:', photoUri ? photoUri.substring(0, 80) : 'EMPTY');
 
+    // Don't set isLoading here — this runs fire-and-forget alongside the UI
     try {
+      console.log('[UserContext] Calling submitVerificationRequest API...');
       const response = await submitVerificationRequest(photoUri);
+      console.log('[UserContext] Verification API response:', JSON.stringify(response));
 
       if (response.success) {
-        console.log('[UserContext] Verification submitted successfully');
-        setState((prev) => ({ ...prev, isLoading: false }));
+        console.log('[UserContext] Verification submitted successfully!');
         return true;
       } else {
-        throw new Error(response.message || 'Failed to submit verification');
+        console.error('[UserContext] Verification API returned success=false:', response.message);
+        return false;
       }
     } catch (error: any) {
-      console.error('[UserContext] Error submitting verification:', error);
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: error.message || 'Failed to submit verification',
-      }));
-      return false;
+      console.error('[UserContext] Verification submission FAILED:', error?.message || error);
+      console.error('[UserContext] Verification error statusCode:', error?.statusCode);
+      // Re-throw so callers can log it
+      throw error;
     }
   }, []);
 

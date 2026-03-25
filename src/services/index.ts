@@ -12,6 +12,8 @@ export * from './interactions.service';
 export * from './profile.service';
 export * from './payment.service';
 export * from './settings.service';
+export * from './legal.service';
+export * from './chat.service';
 
 // Default exports
 export { default as storiesService } from './stories.service';

@@ -27,7 +27,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "InBlood",
   slug: "inblood",
-  version: "2.5",
+  version: "2.7",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "dark",

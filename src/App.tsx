@@ -21,14 +21,19 @@ import { AppProviders, useAuth, useUser, useMatches } from './context';
 import { RootNavigator } from './navigation';
 import { SplashScreen } from './screens/splash';
 import { ForceUpdateScreen } from './screens/ForceUpdateScreen';
+import { MaintenanceScreen } from './screens/MaintenanceScreen';
 import { API_BASE_URL } from './config/api.config';
 import { colors } from './theme';
+import { initAnalytics } from './lib/analytics';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreenExpo.preventAutoHideAsync();
 
 // Fire-and-forget: wake up the backend on cold start
 fetch('https://backend-cfh1.onrender.com/health').catch(() => {});
+
+// Initialize analytics (PostHog + Clarity)
+initAnalytics().catch(() => {});
 
 // Ignore specific warnings in development
 LogBox.ignoreLogs([
@@ -40,26 +45,27 @@ LogBox.ignoreLogs([
  * Shows splash until both minimum animation time AND critical data are ready.
  * For unauthenticated/incomplete-profile users, only waits for animation.
  */
-/** Check if the app needs a force update */
-const checkForceUpdate = async (): Promise<{ forceUpdate: boolean; updateUrl: string }> => {
+/** Check if the app needs a force update or is in maintenance mode */
+const checkAppStatus = async (): Promise<{ forceUpdate: boolean; updateUrl: string; maintenance: boolean }> => {
   try {
     const currentVersion = Constants.expoConfig?.version || '0.0.0';
     const platform = Platform.OS; // 'ios' or 'android'
     const url = `${API_BASE_URL}/app/version-check?platform=${platform}&current_version=${currentVersion}`;
 
-    console.log('[VersionCheck] Checking:', url);
+    console.log('[AppStatus] Checking:', url);
     const response = await fetch(url);
     const json = await response.json();
-    console.log('[VersionCheck] Response:', JSON.stringify(json.data));
+    console.log('[AppStatus] Response:', JSON.stringify(json.data));
 
-    if (json.success && json.data?.force_update) {
-      return { forceUpdate: true, updateUrl: json.data.update_url };
-    }
-    return { forceUpdate: false, updateUrl: '' };
+    return {
+      forceUpdate: !!(json.success && json.data?.force_update),
+      updateUrl: json.data?.update_url || '',
+      maintenance: !!(json.success && json.data?.maintenance_mode),
+    };
   } catch (error) {
     // If backend is down, don't block users
-    console.log('[VersionCheck] Failed (skipping):', error);
-    return { forceUpdate: false, updateUrl: '' };
+    console.log('[AppStatus] Failed (skipping):', error);
+    return { forceUpdate: false, updateUrl: '', maintenance: false };
   }
 };
 
@@ -73,32 +79,35 @@ const PreloadGate: React.FC = () => {
   const [dataReady, setDataReady] = useState(false);
   const [forceUpdate, setForceUpdate] = useState(false);
   const [updateUrl, setUpdateUrl] = useState('');
+  const [maintenance, setMaintenance] = useState(false);
   const prefetchStarted = useRef(false);
 
-  // Check version on mount
+  // Check version + maintenance on mount
   useEffect(() => {
-    checkForceUpdate().then(({ forceUpdate: needsUpdate, updateUrl: url }) => {
-      if (needsUpdate) {
+    checkAppStatus().then((status) => {
+      if (status.forceUpdate) {
         setForceUpdate(true);
-        setUpdateUrl(url);
+        setUpdateUrl(status.updateUrl);
+      }
+      if (status.maintenance) {
+        setMaintenance(true);
       }
     });
   }, []);
 
-  // Re-check when app returns to foreground (user may have updated from store)
+  // Re-check when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active' && forceUpdate) {
-        checkForceUpdate().then(({ forceUpdate: stillNeeds }) => {
-          if (!stillNeeds) {
-            setForceUpdate(false);
-            setUpdateUrl('');
-          }
+      if (nextState === 'active' && (forceUpdate || maintenance)) {
+        checkAppStatus().then((status) => {
+          setForceUpdate(status.forceUpdate);
+          setUpdateUrl(status.forceUpdate ? status.updateUrl : '');
+          setMaintenance(status.maintenance);
         });
       }
     });
     return () => subscription.remove();
-  }, [forceUpdate]);
+  }, [forceUpdate, maintenance]);
 
   // Minimum splash duration (2.2s for animation to complete)
   useEffect(() => {
@@ -159,6 +168,10 @@ const PreloadGate: React.FC = () => {
 
   if (forceUpdate) {
     return <ForceUpdateScreen updateUrl={updateUrl} />;
+  }
+
+  if (maintenance) {
+    return <MaintenanceScreen />;
   }
 
   return <RootNavigator />;

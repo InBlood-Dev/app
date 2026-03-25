@@ -25,11 +25,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ChatBubble, TypingIndicator, OpeningMoveCard } from '../../components';
+import * as ImagePicker from 'expo-image-picker';
+import { ChatBubble, TypingIndicator, OpeningMoveCard, ReportModal } from '../../components';
 import { useChat, useUser } from '../../context';
 import { Message, Profile } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { blockUser, unblockUser } from '../../services/blocking.service';
+import { uploadChatImage, MAX_IMAGE_SIZE } from '../../services/chat.service';
 import { getOnlineStatus } from '../../utils/timeUtils';
 
 type RootStackParamList = {
@@ -64,6 +66,9 @@ export const ChatScreen: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [showMuteOptions, setShowMuteOptions] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -181,6 +186,56 @@ export const ChatScreen: React.FC = () => {
       setMessageText(messageToSend);
     }
   }, [messageText, conversationId, sendMessage, user?.id]);
+
+  const handlePickImage = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 0.7,
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+
+    // Client-side size check (fileSize may be undefined on some platforms)
+    if (asset.fileSize && asset.fileSize > MAX_IMAGE_SIZE) {
+      Alert.alert('Image Too Large', 'Please select an image under 10 MB.');
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPendingImage(asset.uri);
+  }, []);
+
+  const handleSendImage = useCallback(async () => {
+    if (!pendingImage) return;
+
+    // Capture any typed text as a caption
+    const caption = messageText.trim();
+
+    setImageUploading(true);
+    setMessageText('');
+    try {
+      const imageUrl = await uploadChatImage(pendingImage);
+
+      await sendMessage(conversationId, {
+        senderId: user?.id || 'current-user',
+        text: caption,
+        type: 'image',
+        mediaUrl: imageUrl,
+      });
+
+      setPendingImage(null);
+    } catch (error) {
+      console.error('[ChatScreen] Failed to send image:', error);
+      Alert.alert('Error', 'Failed to send image. Please try again.');
+      // Restore caption on error
+      if (caption) setMessageText(caption);
+    } finally {
+      setImageUploading(false);
+    }
+  }, [pendingImage, messageText, conversationId, sendMessage, user?.id]);
 
   // Handle typing indicator
   const handleTextChange = useCallback((text: string) => {
@@ -375,7 +430,8 @@ export const ChatScreen: React.FC = () => {
 
   const handleReportSelect = useCallback(() => {
     closeMenu();
-    Alert.alert('Report User', 'This feature is coming soon.');
+    // Delay so menu modal closes before report modal opens
+    setTimeout(() => setShowReportModal(true), 350);
   }, [closeMenu]);
 
   const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
@@ -470,7 +526,40 @@ export const ChatScreen: React.FC = () => {
           entering={SlideInUp.delay(300)}
           style={[styles.inputContainer, inputAnimatedStyle]}
         >
+          {/* Image preview strip */}
+          {pendingImage && (
+            <View style={styles.imagePreviewStrip}>
+              <Image source={{ uri: pendingImage }} style={styles.imagePreviewThumb} />
+              {imageUploading && (
+                <View style={styles.imagePreviewOverlay}>
+                  <Text style={styles.imagePreviewUploading}>Sending...</Text>
+                </View>
+              )}
+              {!imageUploading && (
+                <Pressable
+                  style={styles.imagePreviewCancel}
+                  onPress={() => setPendingImage(null)}
+                >
+                  <Ionicons name="close-circle" size={22} color={colors.text} />
+                </Pressable>
+              )}
+            </View>
+          )}
+
           <View style={styles.inputRow}>
+            {/* Image picker button */}
+            <Pressable
+              style={styles.imagePickerButton}
+              onPress={handlePickImage}
+              disabled={imageUploading}
+            >
+              <Ionicons
+                name="image-outline"
+                size={24}
+                color={imageUploading ? colors.textMuted : colors.textSecondary}
+              />
+            </Pressable>
+
             <View style={styles.inputWrapper}>
               <TextInput
                 ref={inputRef}
@@ -487,15 +576,15 @@ export const ChatScreen: React.FC = () => {
             <Pressable
               style={[
                 styles.sendButton,
-                messageText.trim() && styles.sendButtonActive,
+                (messageText.trim() || pendingImage) && styles.sendButtonActive,
               ]}
-              onPress={handleSend}
-              disabled={!messageText.trim()}
+              onPress={pendingImage ? handleSendImage : handleSend}
+              disabled={(!messageText.trim() && !pendingImage) || imageUploading}
             >
               <Ionicons
                 name="send"
                 size={20}
-                color={messageText.trim() ? colors.text : colors.textMuted}
+                color={(messageText.trim() || pendingImage) ? colors.text : colors.textMuted}
               />
             </Pressable>
           </View>
@@ -627,6 +716,14 @@ export const ChatScreen: React.FC = () => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Report Modal */}
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        reportedUserId={profile.id}
+        reportedUserName={profile.name}
+      />
     </View>
   );
 };
@@ -723,6 +820,43 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  imagePreviewStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: spacing.sm,
+  },
+  imagePreviewThumb: {
+    width: 60,
+    height: 80,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+  },
+  imagePreviewOverlay: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 60,
+    height: 80,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewUploading: {
+    fontSize: fontSize.xs,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
+  imagePreviewCancel: {
+    marginLeft: spacing.sm,
+  },
+  imagePickerButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.xs,
   },
   inputRow: {
     flexDirection: 'row',

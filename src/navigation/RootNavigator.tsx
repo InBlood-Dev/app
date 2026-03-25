@@ -1,6 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, Theme } from '@react-navigation/native';
+import { trackScreen } from '../lib/analytics';
 import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
 import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
 import { ProfileDetailScreen } from '../screens/home/ProfileDetailScreen';
@@ -52,6 +53,7 @@ const navigationTheme: Theme = {
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, hasCompletedOnboarding, hasCompletedProfileSetup } = useAuth();
   const { matchToast, dismissMatchToast } = useMatches();
+  const routeNameRef = useRef<string | undefined>(undefined);
 
   const handleToastPress = useCallback(() => {
     if (matchToast && navigationRef.isReady()) {
@@ -65,7 +67,21 @@ export const RootNavigator: React.FC = () => {
   }, [matchToast, dismissMatchToast]);
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navigationTheme}
+      onReady={() => {
+        routeNameRef.current = navigationRef.getCurrentRoute()?.name;
+      }}
+      onStateChange={() => {
+        const previousRouteName = routeNameRef.current;
+        const currentRouteName = navigationRef.getCurrentRoute()?.name;
+        if (currentRouteName && previousRouteName !== currentRouteName) {
+          trackScreen(currentRouteName);
+        }
+        routeNameRef.current = currentRouteName;
+      }}
+    >
       <MatchToast
         visible={!!matchToast}
         matchData={matchToast}

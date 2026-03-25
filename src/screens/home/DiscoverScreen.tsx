@@ -40,6 +40,7 @@ import { useMatches, useUser } from '../../context';
 import { SwipeDirection, Profile } from '../../types';
 import { mapInterestedInToGender } from '../../utils/filterMapping';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
+import { DualThumbSlider } from '../../components/DualThumbSlider';
 import { trackProfileView } from '../../services/interactions.service';
 import { startPayment, getPlans } from '../../services/payment.service';
 import type { SubscriptionPlan } from '../../types';
@@ -366,54 +367,31 @@ const FilterModal: React.FC<{
 
               {/* Age Preference */}
               <View style={filterStyles.section}>
-                <Text style={filterStyles.sectionTitle}>Age Preference</Text>
-                <View style={filterStyles.rangeContainer}>
-                  <View style={filterStyles.rangeInput}>
-                    <Text style={filterStyles.rangeLabel}>Min</Text>
-                    <View style={filterStyles.rangeControls}>
-                      <Pressable
-                        style={filterStyles.rangeButton}
-                        onPress={() => setAgeRange({ ...ageRange, min: Math.max(18, ageRange.min - 1) })}
-                      >
-                        <Ionicons name="remove" size={18} color={colors.text} />
-                      </Pressable>
-                      <Text style={filterStyles.rangeValue}>{ageRange.min}</Text>
-                      <Pressable
-                        style={filterStyles.rangeButton}
-                        onPress={() => setAgeRange({ ...ageRange, min: Math.min(ageRange.max - 1, ageRange.min + 1) })}
-                      >
-                        <Ionicons name="add" size={18} color={colors.text} />
-                      </Pressable>
-                    </View>
-                  </View>
-                  <Text style={filterStyles.rangeSeparator}>to</Text>
-                  <View style={filterStyles.rangeInput}>
-                    <Text style={filterStyles.rangeLabel}>Max</Text>
-                    <View style={filterStyles.rangeControls}>
-                      <Pressable
-                        style={filterStyles.rangeButton}
-                        onPress={() => setAgeRange({ ...ageRange, max: Math.max(ageRange.min + 1, ageRange.max - 1) })}
-                      >
-                        <Ionicons name="remove" size={18} color={colors.text} />
-                      </Pressable>
-                      <Text style={filterStyles.rangeValue}>{ageRange.max}</Text>
-                      <Pressable
-                        style={filterStyles.rangeButton}
-                        onPress={() => setAgeRange({ ...ageRange, max: Math.min(99, ageRange.max + 1) })}
-                      >
-                        <Ionicons name="add" size={18} color={colors.text} />
-                      </Pressable>
-                    </View>
-                  </View>
+                <View style={filterStyles.distanceHeader}>
+                  <Text style={filterStyles.sectionTitle}>Age Preference</Text>
+                  <Text style={filterStyles.distanceValue}>
+                    {ageRange.min} - {ageRange.max}
+                  </Text>
                 </View>
+                <DualThumbSlider
+                  min={18}
+                  max={100}
+                  low={ageRange.min}
+                  high={ageRange.max}
+                  step={1}
+                  onValueChange={(lo, hi) => setAgeRange({ min: lo, max: hi })}
+                />
               </View>
 
               {/* Distance */}
               <View style={filterStyles.section}>
                 <View style={filterStyles.distanceHeader}>
-                  <Text style={filterStyles.sectionTitle}>Maximum Distance</Text>
+                  <Text style={filterStyles.sectionTitle}>Map Distance</Text>
                   <Text style={filterStyles.distanceValue}>{distance} km</Text>
                 </View>
+                <Text style={filterStyles.distanceSubtitle}>
+                  Suggests nearby profiles for your matches
+                </Text>
                 <DistanceSlider
                   value={distance}
                   onValueChange={setDistance}
@@ -1491,6 +1469,12 @@ const filterStyles = StyleSheet.create({
   distanceLabel: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+  },
+  distanceSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+    marginBottom: spacing.sm,
   },
   sliderContainer: {
     height: 40,

@@ -238,7 +238,8 @@ export const updatePreferences = async (
 export const submitVerificationRequest = async (
   photoUri: string,
 ): Promise<ApiResponse<VerificationRequestResponse>> => {
-  console.log("[profile.service] Submitting verification request");
+  console.log("[profile.service] Submitting verification request to:", ENDPOINTS.VERIFICATION.REQUEST);
+  console.log("[profile.service] Photo URI:", photoUri ? photoUri.substring(0, 80) : "EMPTY");
 
   const formData = new FormData();
 
@@ -248,10 +249,13 @@ export const submitVerificationRequest = async (
     name: "verification.jpg",
   } as any);
 
-  return postFormData<VerificationRequestResponse>(
+  console.log("[profile.service] FormData created, calling postFormData...");
+  const result = await postFormData<VerificationRequestResponse>(
     ENDPOINTS.VERIFICATION.REQUEST,
     formData,
   );
+  console.log("[profile.service] Verification request result:", JSON.stringify(result));
+  return result;
 };
 
 /**

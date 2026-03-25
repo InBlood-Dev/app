@@ -14,15 +14,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, {
   FadeIn,
   FadeInDown,
-  useSharedValue,
-  useAnimatedStyle,
-  withDecay,
-  cancelAnimation,
-  useDerivedValue,
-  useAnimatedReaction,
-  runOnJS,
 } from 'react-native-reanimated';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -46,13 +39,6 @@ const MIN_ROWS = 5; // Minimum rows per tile (used during loading shimmer)
 const CARD_GAP = 8;
 const CARD_WIDTH = (SCREEN_WIDTH - spacing.md * 2 - CARD_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS;
 const CARD_HEIGHT = CARD_WIDTH * 1.4;
-
-// Cell dimensions (card + gap)
-const CELL_WIDTH = CARD_WIDTH + CARD_GAP;
-const CELL_HEIGHT = CARD_HEIGHT + CARD_GAP;
-
-// Horizontal cycle (fixed — always 3 columns)
-const GRID_CYCLE_WIDTH = CELL_WIDTH * NUM_COLUMNS;
 
 // Shimmer placeholder for loading cards
 const ShimmerCard: React.FC = () => (
@@ -282,211 +268,96 @@ const ProfileCard: React.FC<{
   prevProps.profile.borderColor === nextProps.profile.borderColor
 );
 
-// Helper function for proper modulo that handles negatives
-const mod = (n: number, m: number): number => {
-  'worklet';
-  return ((n % m) + m) % m;
-};
-
-// Infinite 360 Grid Component - renders a tiled grid that wraps seamlessly
-//
-// How it works:
-// - A 3×3 grid of IDENTICAL tiles is rendered.
-// - Each tile contains numRows × 3 cards showing ALL profiles.
-// - The animated transform uses mod() to keep position within one cycle.
-// - Because every tile is an exact copy, when one tile scrolls off-screen
-//   and its neighbour takes its place the transition is perfectly seamless.
-// - The user scrolls through all profiles, then they repeat (infinite loop).
-const InfiniteGrid: React.FC<{
+// Vertical Grid Component - renders a normal vertically-scrolling 3-column grid
+const VerticalGrid: React.FC<{
   onProfilePress: (profile: ReturnType<typeof convertToGalleryProfile>) => void;
   onlineOnly?: boolean;
   activeFilterColor?: string;
 }> = ({ onProfilePress, onlineOnly = false, activeFilterColor }) => {
-  const { getProfileAt, updateCacheCenter, evictDistantRegions, profiles, isInitialLoading, generation } = useExplore();
+  const { profiles, isInitialLoading, generation } = useExplore();
 
-  // Client-side online filter: compute filtered profiles and a local lookup
+  // Client-side online filter
   const filteredProfiles = useMemo(() => {
     if (!onlineOnly) return profiles;
     return profiles.filter(p => isUserOnline(p.last_active_at));
   }, [profiles, onlineOnly]);
 
-  const getFilteredProfileAt = useCallback((col: number, row: number): ExploreProfile | null => {
-    if (!onlineOnly) return getProfileAt(col, row);
-    if (filteredProfiles.length === 0) return null;
-    const normalizedCol = ((col % NUM_COLUMNS) + NUM_COLUMNS) % NUM_COLUMNS;
-    const totalRows = Math.ceil(filteredProfiles.length / NUM_COLUMNS);
-    const normalizedRow = ((row % totalRows) + totalRows) % totalRows;
-    const offset = (normalizedRow * NUM_COLUMNS + normalizedCol) % filteredProfiles.length;
-    return filteredProfiles[offset];
-  }, [onlineOnly, filteredProfiles, getProfileAt]);
-
-  // Each tile must show ALL profiles so that wrapping is seamless.
-  // numRows = total profile rows (ceil(profiles / 3)), capped to keep
-  // the total view count reasonable (numRows × 3 cols × 9 tiles).
   const activeProfiles = onlineOnly ? filteredProfiles : profiles;
-  const numRows = useMemo(() => {
-    if (activeProfiles.length === 0) return MIN_ROWS;
-    const totalProfileRows = Math.ceil(activeProfiles.length / NUM_COLUMNS);
-    return Math.min(50, Math.max(totalProfileRows, MIN_ROWS));
-  }, [activeProfiles.length]);
 
-  // Dynamic vertical cycle = one full tile of all profiles
-  const cycleHeight = CELL_HEIGHT * numRows;
-  const cycleHeightSV = useSharedValue(cycleHeight);
-
-  useEffect(() => {
-    cycleHeightSV.value = cycleHeight;
-  }, [cycleHeight]);
-
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const contextX = useSharedValue(0);
-  const contextY = useSharedValue(0);
-
-  // Re-center grid when generation changes (filter apply, retry, refresh)
-  useEffect(() => {
-    cancelAnimation(translateX);
-    cancelAnimation(translateY);
-    translateX.value = 0;
-    translateY.value = 0;
-    contextX.value = 0;
-    contextY.value = 0;
-  }, [generation]);
-
-  // Debounced handler for viewport updates (cache management)
-  const handleViewportMove = useCallback((row: number) => {
-    updateCacheCenter(0, row);
-    evictDistantRegions();
-  }, [updateCacheCenter, evictDistantRegions]);
-
-  const viewportRow = useDerivedValue(() => {
-    return Math.floor(-translateY.value / CELL_HEIGHT);
-  });
-
-  useAnimatedReaction(
-    () => viewportRow.value,
-    (current, previous) => {
-      if (previous !== null && Math.abs(current - previous) > 5) {
-        runOnJS(handleViewportMove)(current);
-      }
+  // Group profiles into rows of NUM_COLUMNS for FlatList
+  const rows = useMemo(() => {
+    const result: ExploreProfile[][] = [];
+    for (let i = 0; i < activeProfiles.length; i += NUM_COLUMNS) {
+      result.push(activeProfiles.slice(i, i + NUM_COLUMNS));
     }
-  );
+    return result;
+  }, [activeProfiles]);
 
-  const panGesture = Gesture.Pan()
-    .onStart(() => {
-      cancelAnimation(translateX);
-      cancelAnimation(translateY);
-      contextX.value = translateX.value;
-      contextY.value = translateY.value;
-    })
-    .onUpdate((event) => {
-      translateX.value = contextX.value + event.translationX;
-      translateY.value = contextY.value + event.translationY;
-    })
-    .onEnd((event) => {
-      translateX.value = withDecay({
-        velocity: event.velocityX,
-        deceleration: 0.997,
-      });
-      translateY.value = withDecay({
-        velocity: event.velocityY,
-        deceleration: 0.997,
-      });
-    });
-
-  // Animated grid transform — wraps within one cycle so numbers stay small
-  const animatedGridStyle = useAnimatedStyle(() => {
-    const normX = mod(translateX.value, GRID_CYCLE_WIDTH);
-    const normY = mod(translateY.value, cycleHeightSV.value);
-
-    return {
-      transform: [
-        { translateX: normX - GRID_CYCLE_WIDTH },
-        { translateY: normY - cycleHeightSV.value },
-      ],
-    };
-  });
-
-  const renderTiles = () => {
-    const tiles: React.ReactElement[] = [];
-
-    // Shimmer during initial load
-    if (isInitialLoading) {
-      const shimmerCH = CELL_HEIGHT * MIN_ROWS;
-      for (let row = 0; row < MIN_ROWS; row++) {
-        for (let col = 0; col < NUM_COLUMNS; col++) {
-          tiles.push(
-            <View
-              key={`shimmer-${col}-${row}`}
-              style={[
-                styles.cardWrapper,
-                {
-                  left: GRID_CYCLE_WIDTH + col * CELL_WIDTH,
-                  top: shimmerCH + row * CELL_HEIGHT,
-                  width: CARD_WIDTH,
-                  height: CARD_HEIGHT,
-                },
-              ]}
-            >
-              <ShimmerCard />
-            </View>
-          );
-        }
-      }
-      return tiles;
+  // Shimmer rows during loading
+  const shimmerRows = useMemo(() => {
+    const result: null[][] = [];
+    for (let i = 0; i < MIN_ROWS; i++) {
+      result.push(Array(NUM_COLUMNS).fill(null));
     }
+    return result;
+  }, []);
 
-    if (activeProfiles.length === 0) return tiles;
+  const renderRow = useCallback(({ item: row, index: rowIndex }: { item: ExploreProfile[]; index: number }) => (
+    <View style={styles.gridRow}>
+      {row.map((profile, colIndex) => {
+        const galleryProfile = convertToGalleryProfile(profile, activeFilterColor);
+        const isLast = colIndex === NUM_COLUMNS - 1;
+        return (
+          <View key={`${rowIndex}-${colIndex}`} style={[styles.gridCell, isLast && { marginRight: 0 }]}>
+            <ProfileCard
+              profile={galleryProfile}
+              onPress={() => onProfilePress(galleryProfile)}
+            />
+          </View>
+        );
+      })}
+      {/* Fill remaining cells with empty spacers if row is incomplete */}
+      {row.length < NUM_COLUMNS && Array.from({ length: NUM_COLUMNS - row.length }).map((_, i) => {
+        const isLast = (row.length + i) === NUM_COLUMNS - 1;
+        return <View key={`spacer-${rowIndex}-${i}`} style={[styles.gridCell, isLast && { marginRight: 0 }]} />;
+      })}
+    </View>
+  ), [activeFilterColor, onProfilePress]);
 
-    // Render 3×3 IDENTICAL tiles for seamless wrapping.
-    // Every tile shows the exact same content (col, row) so when one
-    // tile scrolls off-screen and its neighbour replaces it, the
-    // transition is invisible.
-    for (let tileRow = 0; tileRow < 3; tileRow++) {
-      for (let tileCol = 0; tileCol < 3; tileCol++) {
-        const tileOffsetX = tileCol * GRID_CYCLE_WIDTH;
-        const tileOffsetY = tileRow * cycleHeight;
+  const renderShimmerRow = useCallback(({ item: row, index: rowIndex }: { item: null[]; index: number }) => (
+    <View style={styles.gridRow}>
+      {row.map((_, colIndex) => (
+        <View key={`shimmer-${rowIndex}-${colIndex}`} style={styles.gridCell}>
+          <ShimmerCard />
+        </View>
+      ))}
+    </View>
+  ), []);
 
-        for (let row = 0; row < numRows; row++) {
-          for (let col = 0; col < NUM_COLUMNS; col++) {
-            const x = tileOffsetX + col * CELL_WIDTH;
-            const y = tileOffsetY + row * CELL_HEIGHT;
-
-            // Same (col, row) for every tile → identical content → seamless
-            const exploreProfile = getFilteredProfileAt(col, row);
-
-            tiles.push(
-              <View
-                key={`${tileCol}-${tileRow}-${col}-${row}`}
-                style={[
-                  styles.cardWrapper,
-                  { left: x, top: y, width: CARD_WIDTH, height: CARD_HEIGHT },
-                ]}
-              >
-                {exploreProfile ? (
-                  <ProfileCard
-                    profile={convertToGalleryProfile(exploreProfile, activeFilterColor)}
-                    onPress={() => onProfilePress(convertToGalleryProfile(exploreProfile, activeFilterColor))}
-                  />
-                ) : (
-                  <ShimmerCard />
-                )}
-              </View>
-            );
-          }
-        }
-      }
-    }
-
-    return tiles;
-  };
+  if (isInitialLoading) {
+    return (
+      <FlatList
+        data={shimmerRows}
+        keyExtractor={(_, index) => `shimmer-row-${index}`}
+        renderItem={renderShimmerRow}
+        contentContainerStyle={styles.gridContent}
+        showsVerticalScrollIndicator={false}
+      />
+    );
+  }
 
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={[styles.gridContainer, { height: cycleHeight * 3 }, animatedGridStyle]}>
-        {renderTiles()}
-      </Animated.View>
-    </GestureDetector>
+    <FlatList
+      key={generation}
+      data={rows}
+      keyExtractor={(_, index) => `row-${index}`}
+      renderItem={renderRow}
+      contentContainerStyle={styles.gridContent}
+      showsVerticalScrollIndicator={false}
+      initialNumToRender={8}
+      maxToRenderPerBatch={6}
+      windowSize={7}
+    />
   );
 };
 
@@ -645,7 +516,7 @@ export const GalleryDiscoverScreen: React.FC = () => {
 
       </SafeAreaView>
 
-      {/* Infinite 360 Grid */}
+      {/* Profile Grid */}
       <View style={styles.gridWrapper}>
         {/* Error state */}
         {error && profiles.length === 0 && !isInitialLoading ? (
@@ -699,7 +570,7 @@ export const GalleryDiscoverScreen: React.FC = () => {
             <Text style={styles.onlineEmptySubtext}>Check back in a bit</Text>
           </View>
         ) : (
-          <InfiniteGrid onProfilePress={handleProfilePress} onlineOnly={onlineOnly} activeFilterColor={selectedRelTypes[0] ? getRelationshipColor(selectedRelTypes[0] as RelationshipType) : undefined} />
+          <VerticalGrid onProfilePress={handleProfilePress} onlineOnly={onlineOnly} activeFilterColor={selectedRelTypes[0] ? getRelationshipColor(selectedRelTypes[0] as RelationshipType) : undefined} />
         )}
 
         {/* Search Results Overlay */}
@@ -950,13 +821,19 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  gridContainer: {
-    position: 'absolute',
-    width: GRID_CYCLE_WIDTH * 3,
-    // height is set dynamically via inline style (cycleHeight * 3)
+  gridContent: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxl,
   },
-  cardWrapper: {
-    position: 'absolute',
+  gridRow: {
+    flexDirection: 'row',
+    marginBottom: CARD_GAP,
+  },
+  gridCell: {
+    width: CARD_WIDTH,
+    height: CARD_HEIGHT,
+    marginRight: CARD_GAP,
   },
   card: {
     flex: 1,

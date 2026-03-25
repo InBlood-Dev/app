@@ -1,10 +1,41 @@
-import React from 'react';
-import { StyleSheet, View, Text, Image, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View, Text, Image, Pressable, ActivityIndicator, Linking } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../types';
 import { colors, borderRadius, fontSize, fontWeight, spacing } from '../theme';
 import * as Haptics from 'expo-haptics';
+
+// Tappable image with loading placeholder
+const ChatImage: React.FC<{ uri: string }> = ({ uri }) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  return (
+    <Pressable onPress={() => Linking.openURL(uri).catch(() => {})}>
+      <View style={styles.imageContainer}>
+        {loading && !error && (
+          <View style={styles.imagePlaceholder}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        )}
+        {error ? (
+          <View style={styles.imagePlaceholder}>
+            <Ionicons name="image-outline" size={28} color={colors.textMuted} />
+          </View>
+        ) : (
+          <Image
+            source={{ uri }}
+            style={[styles.image, loading && { opacity: 0 }]}
+            resizeMode="cover"
+            onLoad={() => setLoading(false)}
+            onError={() => { setError(true); setLoading(false); }}
+          />
+        )}
+      </View>
+    </Pressable>
+  );
+};
 
 interface ChatBubbleProps {
   message: Message;
@@ -62,24 +93,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           styles.bubble,
           isOwn ? styles.ownBubble : styles.otherBubble,
           message.isDeleted && styles.deletedBubble,
+          // Reduce padding for image messages (image fills the bubble edge-to-edge)
+          message.type === 'image' && !message.isDeleted && styles.imageBubble,
         ]}
       >
         {message.type === 'image' && message.mediaUrl && !message.isDeleted && (
-          <Image
-            source={{ uri: message.mediaUrl }}
-            style={styles.image}
-            resizeMode="cover"
-          />
+          <ChatImage uri={message.mediaUrl} />
         )}
-        <Text
-          style={[
-            styles.text,
-            isOwn ? styles.ownText : styles.otherText,
-            message.isDeleted && styles.deletedText,
-          ]}
-        >
-          {message.text}
-        </Text>
+        {/* Only show text if there's actual content (skip empty text for image-only messages) */}
+        {(message.text || message.isDeleted) ? (
+          <Text
+            style={[
+              styles.text,
+              isOwn ? styles.ownText : styles.otherText,
+              message.isDeleted && styles.deletedText,
+              // Add spacing and horizontal padding when caption is below an image
+              (message.type === 'image' && message.mediaUrl && !message.isDeleted && message.text) && {
+                marginTop: spacing.sm,
+                paddingHorizontal: spacing.xs,
+              },
+            ]}
+          >
+            {message.text}
+          </Text>
+        ) : null}
       </Pressable>
 
       {showTimestamp && (
@@ -150,6 +187,10 @@ const styles = StyleSheet.create({
   otherText: {
     color: colors.text,
   },
+  imageBubble: {
+    padding: spacing.xs,
+    overflow: 'hidden',
+  },
   deletedBubble: {
     opacity: 0.6,
   },
@@ -157,11 +198,22 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     color: colors.textMuted,
   },
-  image: {
-    width: 200,
-    height: 150,
+  imageContainer: {
+    width: 220,
+    height: 260,
     borderRadius: borderRadius.md,
-    marginBottom: spacing.xs,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  image: {
+    width: 220,
+    height: 260,
+    borderRadius: borderRadius.md,
+  },
+  imagePlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   meta: {
     flexDirection: 'row',

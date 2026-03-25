@@ -629,16 +629,16 @@ export interface VerificationStatusResponse {
 // ==========================================
 
 /**
- * Plan type sent to backend
+ * Plan type sent to backend (dynamic - matches plan_key from backend)
  */
-export type PlanType = "monthly" | "annual";
+export type PlanType = string;
 
 /**
  * Subscription plan from backend
  */
 export interface SubscriptionPlan {
   _id: string;
-  plan_key: PlanType;
+  plan_key: string;
   name: string;
   price: number;
   original_price: number | null;

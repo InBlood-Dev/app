@@ -26,7 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { AnimatedButton } from '../../components';
+import { AnimatedButton, DefaultAvatar } from '../../components';
 import { Match } from '../../types';
 import { useMatches, useUser } from '../../context';
 import { colors, fontSize, fontWeight, spacing, borderRadius, shadows } from '../../theme';
@@ -436,10 +436,14 @@ export const MatchScreen: React.FC = () => {
                 colors={['rgba(229, 57, 53, 0.3)', 'rgba(229, 57, 53, 0)']}
                 style={styles.photoGlow}
               />
-              <Image
-                source={{ uri: user?.photos?.[0] || 'https://images.unsplash.com/photo-1618077360395-f3068be8e001?w=200&h=200&fit=crop' }}
-                style={styles.photo}
-              />
+              {user?.photos?.[0] ? (
+                <Image
+                  source={{ uri: user.photos[0] }}
+                  style={styles.photo}
+                />
+              ) : (
+                <DefaultAvatar size={120} />
+              )}
             </Animated.View>
 
             <Animated.View style={[styles.heartWrapper, heartAnimatedStyle]}>

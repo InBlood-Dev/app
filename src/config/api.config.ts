@@ -119,6 +119,11 @@ export const ENDPOINTS = {
   // Settings
   SETTINGS: "/users/settings",
 
+  // Reports
+  REPORTS: {
+    CREATE: "/reports",
+  },
+
   // Blocking
   BLOCKS: {
     LIST: "/blocks",
@@ -130,6 +135,11 @@ export const ENDPOINTS = {
   NOTIFICATIONS: {
     REGISTER_TOKEN: "/notifications/register-token",
     UNREGISTER_TOKEN: "/notifications/unregister-token",
+  },
+
+  // Legal
+  LEGAL: {
+    PAGE: (slug: string) => `/legal/${slug}`,
   },
 
   // Conversations

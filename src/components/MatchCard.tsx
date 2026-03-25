@@ -7,6 +7,7 @@ import Animated, {
   FadeInRight,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { Match } from '../types';
 import { colors, borderRadius, fontSize, fontWeight, spacing, shadows } from '../theme';
 import { isUserOnline } from '../utils/timeUtils';
@@ -60,10 +61,16 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, onPress, index = 0 
       style={[styles.container, shadows.sm, animatedStyle]}
     >
       <View style={styles.avatarContainer}>
-        <Image
-          source={{ uri: match.profile.photos[0] }}
-          style={styles.avatar}
-        />
+        {match.profile.photos[0] ? (
+          <Image
+            source={{ uri: match.profile.photos[0] }}
+            style={styles.avatar}
+          />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }]}>
+            <Ionicons name="person" size={22} color={colors.textMuted} />
+          </View>
+        )}
         {online && <View style={styles.avatarOnlineDot} />}
       </View>
 
@@ -125,10 +132,16 @@ export const NewMatchBubble: React.FC<{ match: Match; onPress: () => void }> = (
       style={[styles.bubbleContainer, animatedStyle]}
     >
       <View style={styles.bubbleImageContainer}>
-        <Image
-          source={{ uri: match.profile.photos[0] }}
-          style={styles.bubbleImage}
-        />
+        {match.profile.photos[0] ? (
+          <Image
+            source={{ uri: match.profile.photos[0] }}
+            style={styles.bubbleImage}
+          />
+        ) : (
+          <View style={[styles.bubbleImage, { backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }]}>
+            <Ionicons name="person" size={24} color={colors.textMuted} />
+          </View>
+        )}
         {online && <View style={styles.onlineDot} />}
       </View>
       <Text style={styles.bubbleName} numberOfLines={1}>
