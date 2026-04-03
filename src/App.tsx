@@ -109,20 +109,20 @@ const PreloadGate: React.FC = () => {
     return () => subscription.remove();
   }, [forceUpdate, maintenance]);
 
-  // Minimum splash duration (2.2s for animation to complete)
+  // Minimum splash duration (800ms for animation to complete)
   useEffect(() => {
-    const timer = setTimeout(() => setMinTimeElapsed(true), 2200);
+    const timer = setTimeout(() => setMinTimeElapsed(true), 800);
     return () => clearTimeout(timer);
   }, []);
 
-  // Safety timeout: dismiss splash after 8s no matter what (slow network fallback)
+  // Safety timeout: dismiss splash after 3s no matter what (slow network fallback)
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!dataReady) {
         console.log('[PreloadGate] Safety timeout - dismissing splash');
         setDataReady(true);
       }
-    }, 8000);
+    }, 3000);
     return () => clearTimeout(timer);
   }, [dataReady]);
 

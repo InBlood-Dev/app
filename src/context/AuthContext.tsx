@@ -67,7 +67,7 @@ interface AuthContextType extends AuthState {
 const initialState: AuthState = {
   isAuthenticated: false,
   isLoading: true,
-  hasCompletedOnboarding: false,
+  hasCompletedOnboarding: true,
   hasCompletedProfileSetup: false,
   email: null,
   name: null,

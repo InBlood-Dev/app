@@ -1,7 +1,6 @@
 import { Profile, Match } from '../types';
 
 export type RootStackParamList = {
-  Onboarding: undefined;
   Auth: undefined;
   ProfileSetup: undefined;
   MainTabs: undefined;

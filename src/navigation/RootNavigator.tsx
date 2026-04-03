@@ -2,7 +2,6 @@ import React, { useCallback, useRef } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, Theme } from '@react-navigation/native';
 import { trackScreen } from '../lib/analytics';
-import { OnboardingScreen } from '../screens/onboarding/OnboardingScreen';
 import { ProfileSetupScreen } from '../screens/profile/ProfileSetupScreen';
 import { ProfileDetailScreen } from '../screens/home/ProfileDetailScreen';
 import { MatchScreen } from '../screens/home/MatchScreen';
@@ -51,7 +50,7 @@ const navigationTheme: Theme = {
 };
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated, hasCompletedOnboarding, hasCompletedProfileSetup } = useAuth();
+  const { isAuthenticated, hasCompletedProfileSetup } = useAuth();
   const { matchToast, dismissMatchToast } = useMatches();
   const routeNameRef = useRef<string | undefined>(undefined);
 
@@ -95,14 +94,7 @@ export const RootNavigator: React.FC = () => {
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        {!hasCompletedOnboarding ? (
-          /* Onboarding */
-          <Stack.Screen
-            name="Onboarding"
-            component={OnboardingScreen}
-            options={{ animation: 'fade' }}
-          />
-        ) : !isAuthenticated ? (
+        {!isAuthenticated ? (
           /* Auth Flow */
           <Stack.Screen
             name="Auth"

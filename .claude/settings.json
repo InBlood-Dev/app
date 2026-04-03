@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(mv Screenshot*2.31.57*.png marquee4.png)",
+      "Bash(mv Screenshot*2.32.13*.png marquee5.png)",
+      "Bash(mv Screenshot*2.35.30*.png marquee6.png)",
+      "Bash(mv Screenshot*2.36.05*.png marquee7.png)",
+      "Bash(mv Screenshot*2.44.49*.png marquee15.png)",
+      "Bash(mv Screenshot*2.45.03*.png marquee16.png)",
+      "Bash(mv Screenshot*2.45.44*.png marquee17.png)"
     ]
   }
 }

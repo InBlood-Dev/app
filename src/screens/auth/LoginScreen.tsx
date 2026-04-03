@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Asset } from 'expo-asset';
 import {
   StyleSheet,
   View,
@@ -37,8 +38,127 @@ import { TermsModal } from '../../components/modals/TermsModal';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Background image
-const bgImage = require('../../../assets/lesbo.png');
+const COL_COUNT = 3;
+const COL_GAP = 8;
+const SIDE_PAD = 8;
+const COL_WIDTH = (SCREEN_WIDTH - SIDE_PAD * 2 - COL_GAP * (COL_COUNT - 1)) / COL_COUNT;
+const IMAGE_HEIGHT = COL_WIDTH * 1.45;
+const ROW_GAP = 8;
+
+// Local marquee images
+import { ImageSourcePropType } from 'react-native';
+
+const img1 = require('../../../assets/marquee1.png');
+const img2 = require('../../../assets/marquee2.png');
+const img3 = require('../../../assets/marquee3.png');
+const img4 = require('../../../assets/marquee4.png');
+const img5 = require('../../../assets/marquee5.png');
+const img6 = require('../../../assets/marquee6.png');
+const img7 = require('../../../assets/marquee7.png');
+const img8 = require('../../../assets/marquee8.png');
+const img9 = require('../../../assets/marquee9.png');
+const img10 = require('../../../assets/marquee10.png');
+const img11 = require('../../../assets/marquee11.png');
+const img12 = require('../../../assets/marquee12.png');
+const img13 = require('../../../assets/marquee13.png');
+const img14 = require('../../../assets/marquee14.png');
+const img15 = require('../../../assets/marquee15.png');
+const img16 = require('../../../assets/marquee16.png');
+const img17 = require('../../../assets/marquee17.png');
+
+// 17 images spread across 3 columns (6 each, shuffled)
+const MARQUEE_IMAGES: ImageSourcePropType[][] = [
+  [img1, img6, img11, img15, img9, img4],
+  [img8, img3, img16, img13, img5, img14],
+  [img12, img17, img7, img2, img10, img4],
+];
+
+// Single marquee column that scrolls continuously
+const MarqueeColumn: React.FC<{ images: ImageSourcePropType[]; speed: number; initialOffset: number }> = React.memo(
+  ({ images, speed, initialOffset }) => {
+    const translateY = useSharedValue(initialOffset);
+    // Double images for seamless loop
+    const doubledImages = useMemo(() => [...images, ...images], [images]);
+    const singleSetHeight = images.length * (IMAGE_HEIGHT + ROW_GAP);
+
+    useEffect(() => {
+      translateY.value = initialOffset;
+      translateY.value = withRepeat(
+        withTiming(initialOffset - singleSetHeight, {
+          duration: speed,
+          easing: Easing.linear,
+        }),
+        -1,
+        false,
+      );
+    }, []);
+
+    const animStyle = useAnimatedStyle(() => ({
+      transform: [{ translateY: translateY.value }],
+    }));
+
+    return (
+      <View style={marqueeStyles.columnWrapper}>
+        <Animated.View style={animStyle}>
+          {doubledImages.map((src, idx) => (
+            <Image
+              key={`${idx}`}
+              source={src}
+              style={marqueeStyles.image}
+              resizeMode="cover"
+            />
+          ))}
+        </Animated.View>
+      </View>
+    );
+  },
+);
+
+// Marquee background with 3 columns
+const MarqueeBackground: React.FC = React.memo(() => {
+  return (
+    <View style={styles.backgroundContainer}>
+      <View style={marqueeStyles.columnsRow}>
+        <MarqueeColumn images={MARQUEE_IMAGES[0]} speed={25000} initialOffset={0} />
+        <MarqueeColumn images={MARQUEE_IMAGES[1]} speed={20000} initialOffset={-IMAGE_HEIGHT * 0.5} />
+        <MarqueeColumn images={MARQUEE_IMAGES[2]} speed={28000} initialOffset={-IMAGE_HEIGHT * 0.3} />
+      </View>
+
+      {/* Dark overlay for readability */}
+      <View style={styles.grayscaleOverlay} />
+      <LinearGradient
+        colors={['rgba(0,0,0,0.4)', 'rgba(0,0,0,0.15)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.97)']}
+        locations={[0, 0.25, 0.6, 1]}
+        style={styles.vignetteOverlay}
+      />
+    </View>
+  );
+});
+
+const marqueeStyles = StyleSheet.create({
+  columnsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: SIDE_PAD,
+    gap: COL_GAP,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflow: 'hidden',
+  },
+  columnWrapper: {
+    width: COL_WIDTH,
+    overflow: 'hidden',
+  },
+  image: {
+    width: COL_WIDTH,
+    height: IMAGE_HEIGHT,
+    borderRadius: 12,
+    marginBottom: ROW_GAP,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+});
 
 type AuthStackParamList = {
   Login: undefined;
@@ -46,29 +166,8 @@ type AuthStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
 
-// Static Background Component
-const StaticBackground: React.FC = () => {
-  return (
-    <View style={styles.backgroundContainer}>
-      <Image
-        source={bgImage}
-        style={styles.backgroundImage}
-        resizeMode="cover"
-      />
-
-      {/* Dark overlay */}
-      <View style={styles.grayscaleOverlay} />
-      <LinearGradient
-        colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.1)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
-        locations={[0, 0.3, 0.6, 1]}
-        style={styles.vignetteOverlay}
-      />
-
-      {/* Radial vignette effect */}
-      <View style={styles.radialVignette} />
-    </View>
-  );
-};
+// All images to preload
+const ALL_IMAGES = [img1, img2, img3, img4, img5, img6, img7, img8, img9, img10, img11, img12, img13, img14, img15, img16, img17];
 
 export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -77,8 +176,18 @@ export const LoginScreen: React.FC = () => {
   const { userLocation } = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [assetsReady, setAssetsReady] = useState(false);
 
+  const screenOpacity = useSharedValue(0);
   const logoScale = useSharedValue(1);
+
+  // Preload all marquee images, then fade in everything together
+  useEffect(() => {
+    Asset.loadAsync(ALL_IMAGES).then(() => {
+      setAssetsReady(true);
+      screenOpacity.value = withTiming(1, { duration: 500 });
+    });
+  }, []);
 
   useEffect(() => {
     // Subtle logo pulse animation
@@ -94,6 +203,10 @@ export const LoginScreen: React.FC = () => {
 
   const logoAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: logoScale.value }],
+  }));
+
+  const screenAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: screenOpacity.value,
   }));
 
   const handleGoogleLogin = useCallback(async () => {
@@ -174,10 +287,14 @@ export const LoginScreen: React.FC = () => {
     BackHandler.exitApp();
   }, []);
 
+  if (!assetsReady) {
+    return <View style={styles.container} />;
+  }
+
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, screenAnimatedStyle]}>
       {/* Background */}
-      <StaticBackground />
+      <MarqueeBackground />
 
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
@@ -264,7 +381,7 @@ export const LoginScreen: React.FC = () => {
         onClose={() => setShowTermsModal(false)}
         onDisagree={handleDisagreeTerms}
       />
-    </View>
+    </Animated.View>
   );
 };
 
@@ -276,27 +393,12 @@ const styles = StyleSheet.create({
   backgroundContainer: {
     ...StyleSheet.absoluteFillObject,
   },
-  backgroundImage: {
-    position: 'absolute',
-    top: -80,
-    left: -40,
-    width: SCREEN_WIDTH + 40,
-    height: SCREEN_HEIGHT + 80,
-  },
   grayscaleOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    // Note: True grayscale would need a custom filter, this is a dark overlay approximation
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
   vignetteOverlay: {
     ...StyleSheet.absoluteFillObject,
-  },
-  radialVignette: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-    borderWidth: 100,
-    borderColor: 'rgba(0,0,0,0.3)',
-    borderRadius: SCREEN_WIDTH,
   },
   safeArea: {
     flex: 1,

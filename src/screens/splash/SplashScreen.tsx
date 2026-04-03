@@ -22,43 +22,42 @@ interface SplashScreenProps {
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, shouldDismiss }) => {
   const scale = useSharedValue(0.3);
-  const opacity = useSharedValue(0);
+  const logoOpacity = useSharedValue(0);
+  const bgOpacity = useSharedValue(1);
   const translateY = useSharedValue(50);
-  const rotate = useSharedValue(0);
   const hasDismissed = useRef(false);
 
   useEffect(() => {
-    // Initial fade in and scale up
-    opacity.value = withTiming(1, { duration: 400 });
-    translateY.value = withSpring(0, { damping: 12, stiffness: 100 });
+    // Fade in and scale up with bounce
+    logoOpacity.value = withTiming(1, { duration: 300 });
+    translateY.value = withSpring(0, { damping: 12, stiffness: 180 });
 
-    // Bouncing animation sequence
+    // Bounce in then settle at scale 1
     scale.value = withSequence(
-      withSpring(1.2, { damping: 8, stiffness: 150 }),
-      withSpring(0.9, { damping: 8, stiffness: 150 }),
-      withSpring(1.1, { damping: 10, stiffness: 150 }),
-      withSpring(0.95, { damping: 10, stiffness: 150 }),
+      withSpring(1.15, { damping: 8, stiffness: 180 }),
+      withSpring(0.95, { damping: 10, stiffness: 180 }),
       withSpring(1, { damping: 15, stiffness: 200 }),
-    );
-
-    // Subtle rotation for playfulness
-    rotate.value = withSequence(
-      withTiming(-5, { duration: 150 }),
-      withTiming(5, { duration: 150 }),
-      withTiming(-3, { duration: 150 }),
-      withTiming(3, { duration: 150 }),
-      withTiming(0, { duration: 150 }),
     );
   }, []);
 
-  // External dismiss control: fade out when shouldDismiss becomes true
+  // When ready to dismiss: keep logo visible, fade out background, then finish
   useEffect(() => {
     if (shouldDismiss && !hasDismissed.current) {
       hasDismissed.current = true;
-      opacity.value = withTiming(0, { duration: 300 }, () => {
-        runOnJS(onFinish)();
-      });
-      scale.value = withTiming(0.8, { duration: 300 });
+
+      // Hold logo visible for 600ms after bounce settles, then fade out everything
+      bgOpacity.value = withDelay(
+        600,
+        withTiming(0, { duration: 400 }, () => {
+          runOnJS(onFinish)();
+        }),
+      );
+
+      // Logo stays at full opacity during hold, then fades with background
+      logoOpacity.value = withDelay(600, withTiming(0, { duration: 400 }));
+
+      // Slight scale up as it fades out (zoom-away effect)
+      scale.value = withDelay(600, withTiming(1.1, { duration: 400 }));
     }
   }, [shouldDismiss]);
 
@@ -66,13 +65,16 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, shouldDism
     transform: [
       { scale: scale.value },
       { translateY: translateY.value },
-      { rotate: `${rotate.value}deg` },
     ],
-    opacity: opacity.value,
+    opacity: logoOpacity.value,
+  }));
+
+  const containerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bgOpacity.value,
   }));
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, containerAnimatedStyle]}>
       <LinearGradient
         colors={[colors.background, '#1a0505', colors.background]}
         start={{ x: 0, y: 0 }}
@@ -85,7 +87,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, shouldDism
           <View style={styles.glowInner} />
         </Animated.View>
 
-        {/* Logo */}
+        {/* Logo — stays visible after bounce */}
         <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
           <Image
             source={require('../../assets/images/logo.png')}
@@ -97,7 +99,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, shouldDism
         {/* Pulsing rings */}
         <PulsingRings />
       </LinearGradient>
-    </View>
+    </Animated.View>
   );
 };
 
@@ -114,14 +116,14 @@ const PulsingRings: React.FC = () => {
       scaleVal.value = withDelay(
         delay,
         withSequence(
-          withTiming(1.8, { duration: 1500, easing: Easing.out(Easing.ease) }),
+          withTiming(1.8, { duration: 700, easing: Easing.out(Easing.ease) }),
           withTiming(1, { duration: 0 })
         )
       );
       opacityVal.value = withDelay(
         delay,
         withSequence(
-          withTiming(0, { duration: 1500, easing: Easing.out(Easing.ease) }),
+          withTiming(0, { duration: 700, easing: Easing.out(Easing.ease) }),
           withTiming(0.5, { duration: 0 })
         )
       );
