@@ -191,32 +191,35 @@ export const LocationProvider: React.FC<{ children: ReactNode }> = ({ children }
    * Fetch users for map view with coordinates
    */
   const fetchMapUsers = useCallback(async (radius: number = 25) => {
-    console.log('[LocationContext] Fetching map users');
+    console.log('[LocationContext] fetchMapUsers called with radius:', radius);
+    console.log('[LocationContext] userLocation:', JSON.stringify(state.userLocation));
 
     if (!state.userLocation) {
-      console.warn('[LocationContext] No user location available');
+      console.warn('[LocationContext] No user location available - cannot fetch map users');
       return;
     }
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
+      console.log('[LocationContext] Calling getMapNearbyUsers API...');
       const response = await getMapNearbyUsers(
         state.userLocation.latitude,
         state.userLocation.longitude,
         radius
       );
 
+      console.log('[LocationContext] API response success:', response.success, 'data:', JSON.stringify(response.data)?.substring(0, 200));
+
       if (response.success && response.data?.users) {
-        console.log('[LocationContext] Map users:', response.data.users.length);
+        console.log('[LocationContext] Map users received:', response.data.users.length);
         setState(prev => ({
           ...prev,
           mapUsers: response.data.users,
           isLoading: false,
         }));
       } else if (response.success && !response.data?.users) {
-        // API succeeded but no users data
-        console.log('[LocationContext] No map users data in response');
+        console.log('[LocationContext] No map users data in response. Full response:', JSON.stringify(response)?.substring(0, 300));
         setState(prev => ({
           ...prev,
           mapUsers: [],

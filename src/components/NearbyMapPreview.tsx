@@ -21,6 +21,7 @@ export const NearbyMapPreview: React.FC<Props> = ({
   onMapPress,
   height = 220,
 }) => {
+  console.log(`[NearbyMapPreview] Rendering: ${users.length} users, userLocation: ${JSON.stringify(userLocation)}, height: ${height}`);
   // Prefetch images for better map marker performance
   useEffect(() => {
     const imagesToPrefetch = users
@@ -119,6 +120,9 @@ export const NearbyMapPreview: React.FC<Props> = ({
 
     return MAPS_CONFIG.DEFAULT_REGION;
   }, [userLocation, users]);
+
+  console.log(`[NearbyMapPreview] Region: ${JSON.stringify(region)}`);
+  console.log(`[NearbyMapPreview] spreadMarkers: ${spreadMarkers.length}`);
 
   return (
     <Pressable onPress={onMapPress} style={[styles.container, { height }]}>

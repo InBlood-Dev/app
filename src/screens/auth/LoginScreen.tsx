@@ -37,14 +37,8 @@ import { TermsModal } from '../../components/modals/TermsModal';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Couple images for the background slideshow - Indian couples
-const COUPLE_IMAGES = [
-  'https://images.pexels.com/photos/6544197/pexels-photo-6544197.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Indian couple in traditional clothing
-  'https://images.pexels.com/photos/19733687/pexels-photo-19733687.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Indian wedding couple portrait
-  'https://images.pexels.com/photos/18362003/pexels-photo-18362003.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Hindu groom kissing bride
-  'https://images.pexels.com/photos/30155180/pexels-photo-30155180.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Romantic Indian couple embracing
-  'https://images.pexels.com/photos/20610664/pexels-photo-20610664.jpeg?auto=compress&cs=tinysrgb&w=800&h=1200&fit=crop', // Happy Indian newlyweds
-];
+// Background image
+const bgImage = require('../../../assets/lesbo.png');
 
 type AuthStackParamList = {
   Login: undefined;
@@ -52,69 +46,17 @@ type AuthStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<AuthStackParamList>;
 
-// Animated Background Component
-const AnimatedBackground: React.FC = () => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const opacity1 = useSharedValue(1);
-  const opacity2 = useSharedValue(0);
-  const scale1 = useSharedValue(1);
-  const scale2 = useSharedValue(1.1);
-  const [showFirst, setShowFirst] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (showFirst) {
-        opacity1.value = withTiming(0, { duration: 1000 });
-        opacity2.value = withTiming(1, { duration: 1000 });
-        scale1.value = withTiming(1.1, { duration: 5000 });
-        scale2.value = 1;
-        scale2.value = withTiming(1.1, { duration: 5000 });
-      } else {
-        opacity1.value = withTiming(1, { duration: 1000 });
-        opacity2.value = withTiming(0, { duration: 1000 });
-        scale2.value = withTiming(1.1, { duration: 5000 });
-        scale1.value = 1;
-        scale1.value = withTiming(1.1, { duration: 5000 });
-      }
-
-      setShowFirst(!showFirst);
-      setCurrentIndex((prev) => (prev + 1) % COUPLE_IMAGES.length);
-    }, 4000);
-
-    // Start initial zoom
-    scale1.value = withTiming(1.1, { duration: 5000 });
-
-    return () => clearInterval(interval);
-  }, [showFirst]);
-
-  const animatedStyle1 = useAnimatedStyle(() => ({
-    opacity: opacity1.value,
-    transform: [{ scale: scale1.value }],
-  }));
-
-  const animatedStyle2 = useAnimatedStyle(() => ({
-    opacity: opacity2.value,
-    transform: [{ scale: scale2.value }],
-  }));
-
-  const nextIndex = (currentIndex + 1) % COUPLE_IMAGES.length;
-
+// Static Background Component
+const StaticBackground: React.FC = () => {
   return (
     <View style={styles.backgroundContainer}>
-      <Animated.Image
-        source={{ uri: COUPLE_IMAGES[currentIndex] }}
-        style={[styles.backgroundImage, animatedStyle1]}
+      <Image
+        source={bgImage}
+        style={styles.backgroundImage}
         resizeMode="cover"
-        blurRadius={0}
-      />
-      <Animated.Image
-        source={{ uri: COUPLE_IMAGES[nextIndex] }}
-        style={[styles.backgroundImage, animatedStyle2]}
-        resizeMode="cover"
-        blurRadius={0}
       />
 
-      {/* Black & White + Vignette overlay */}
+      {/* Dark overlay */}
       <View style={styles.grayscaleOverlay} />
       <LinearGradient
         colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.1)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
@@ -234,8 +176,8 @@ export const LoginScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Animated Background */}
-      <AnimatedBackground />
+      {/* Background */}
+      <StaticBackground />
 
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
@@ -335,9 +277,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   backgroundImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    position: 'absolute',
+    top: -80,
+    left: -40,
+    width: SCREEN_WIDTH + 40,
+    height: SCREEN_HEIGHT + 80,
   },
   grayscaleOverlay: {
     ...StyleSheet.absoluteFillObject,

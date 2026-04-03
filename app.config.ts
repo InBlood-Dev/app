@@ -40,6 +40,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.inblood.app",
+    googleServicesFile: "./GoogleService-Info.plist",
     config: {
       googleMapsApiKey: "AIzaSyB6qyKSRUDCdU6Nl88Kg59JdvBr4nDrhJg",
     },
@@ -72,7 +73,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "@react-native-google-signin/google-signin",
       {
         iosUrlScheme:
-          "com.googleusercontent.apps.345043990448-d7t4lhjte5tqfh7249ovia2b6pbn0k90",
+          "com.googleusercontent.apps.345043990448-qfq91ghdtg95tjommcskfbpfgf5frdb0",
       },
     ],
     [

@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
+import { Platform } from 'react-native';
 import {
   GoogleSignin,
   statusCodes,
@@ -60,6 +61,7 @@ export const useGoogleAuth = (): UseGoogleAuthReturn => {
       try {
         await GoogleSignin.configure({
           scopes: ['profile', 'email'],
+          iosClientId: '345043990448-qfq91ghdtg95tjommcskfbpfgf5frdb0.apps.googleusercontent.com',
         });
         setIsConfigured(true);
         console.log('[useGoogleAuth] Google Sign-In configured successfully');
@@ -104,10 +106,12 @@ export const useGoogleAuth = (): UseGoogleAuthReturn => {
         }
       }
 
-      // Check if user has Google Play Services
-      console.log('[useGoogleAuth] Checking Play Services');
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      console.log('[useGoogleAuth] Play Services available');
+      // Check if user has Google Play Services (Android only)
+      if (Platform.OS === 'android') {
+        console.log('[useGoogleAuth] Checking Play Services');
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        console.log('[useGoogleAuth] Play Services available');
+      }
 
       // Sign in
       console.log('[useGoogleAuth] Calling GoogleSignin.signIn()');

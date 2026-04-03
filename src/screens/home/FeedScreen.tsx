@@ -18,6 +18,7 @@ import {
   Modal,
   PanResponder,
   GestureResponderEvent,
+  Platform,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -965,11 +966,14 @@ export const FeedScreen: React.FC = () => {
 
   // Log map users data
   useEffect(() => {
+    console.log(`[FeedScreen] mapUsers changed: ${mapUsers.length} users, isLocationLoading: ${isLocationLoading}, hasPermission: ${hasPermission}, userLocation: ${JSON.stringify(userLocation)}`);
     if (mapUsers.length > 0) {
       console.log(`[FeedScreen] Map users loaded: ${mapUsers.length} users`);
-      console.log("[FeedScreen] Sample user:", mapUsers[0]);
+      console.log("[FeedScreen] Sample user:", JSON.stringify(mapUsers[0]));
+    } else {
+      console.log('[FeedScreen] No map users available');
     }
-  }, [mapUsers]);
+  }, [mapUsers, isLocationLoading, hasPermission, userLocation]);
 
   // Prefetch images when map modal opens
   useEffect(() => {
@@ -1612,13 +1616,13 @@ export const FeedScreen: React.FC = () => {
           setSelectedMapUser(null);
         }}
       >
-        <SafeAreaView edges={["top"]} style={mapStyles.container}>
+        <View style={mapStyles.container}>
           <LinearGradient
             colors={["#0a0a0a", "#1a1a1a"]}
             style={mapStyles.gradient}
           >
             {/* Header */}
-            <View style={mapStyles.header}>
+            <View style={[mapStyles.header, { paddingTop: insets.top + spacing.sm }]}>
               <View style={mapStyles.headerLeft}>
                 <Ionicons name="location" size={24} color={colors.primary} />
                 <Text style={mapStyles.headerTitle}>Nearby</Text>
@@ -1638,32 +1642,34 @@ export const FeedScreen: React.FC = () => {
             </View>
 
             {/* Interactive Google Map */}
-            <MapView
-              provider={PROVIDER_GOOGLE}
-              style={mapStyles.map}
-              initialRegion={
-                userLocation
-                  ? { ...userLocation, latitudeDelta: 0.1, longitudeDelta: 0.1 }
-                  : MAPS_CONFIG.DEFAULT_REGION
-              }
-              customMapStyle={DARK_MAP_STYLE}
-              showsUserLocation
-              showsMyLocationButton
-              onPress={handleMapPress}
-            >
-              {spreadMapMarkers.map((user) => (
-                <MapUserMarker
-                  key={user.user_id}
-                  user={{
-                    ...user,
-                    latitude: user.displayLat,
-                    longitude: user.displayLng,
-                  }}
-                  onPress={handleMapUserPress}
-                  isSelected={selectedMapUser?.user_id === user.user_id}
-                />
-              ))}
-            </MapView>
+            <View style={{ flex: 1 }}>
+              <MapView
+                provider={PROVIDER_GOOGLE}
+                style={mapStyles.map}
+                initialRegion={
+                  userLocation
+                    ? { ...userLocation, latitudeDelta: 0.1, longitudeDelta: 0.1 }
+                    : MAPS_CONFIG.DEFAULT_REGION
+                }
+                customMapStyle={DARK_MAP_STYLE}
+                showsUserLocation
+                showsMyLocationButton
+                onPress={handleMapPress}
+              >
+                {spreadMapMarkers.map((user) => (
+                  <MapUserMarker
+                    key={user.user_id}
+                    user={{
+                      ...user,
+                      latitude: user.displayLat,
+                      longitude: user.displayLng,
+                    }}
+                    onPress={handleMapUserPress}
+                    isSelected={selectedMapUser?.user_id === user.user_id}
+                  />
+                ))}
+              </MapView>
+            </View>
 
             {/* Selected User Card */}
             {(() => {
@@ -1683,7 +1689,7 @@ export const FeedScreen: React.FC = () => {
               );
             })()}
           </LinearGradient>
-        </SafeAreaView>
+        </View>
       </Modal>
 
       {/* My Stories Modal */}

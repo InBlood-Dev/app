@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -118,7 +119,7 @@ export const MainTabNavigator: React.FC = () => {
           tabBarStyle: [
             styles.tabBar,
             isDarkTheme ? styles.tabBarDark : styles.tabBarLight,
-            { bottom: 16 + insets.bottom },
+            { bottom: 20 },
           ],
           tabBarShowLabel: false,
           tabBarActiveTintColor: colors.primary,
@@ -218,14 +219,14 @@ export const MainTabNavigator: React.FC = () => {
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
-    bottom: 16,
-    left: 20,
-    right: 20,
+    bottom: 0,
+    left: 10,
+    right: 0,
     height: 70,
-    borderRadius: 35,
+    borderRadius: 38,
     paddingTop: spacing.md,
     paddingBottom: spacing.xs,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
@@ -245,7 +246,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   tabIconContainer: {
-    width: 50,
+    width: 40,
     height: 32,
     borderRadius: borderRadius.md,
     justifyContent: 'center',
@@ -274,9 +275,9 @@ const styles = StyleSheet.create({
     top: -20,
   },
   centerButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',

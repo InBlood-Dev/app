@@ -82,11 +82,12 @@ export const ChatScreen: React.FC = () => {
   }));
 
   // Input paddingBottom transitions: insets.bottom (above nav bar) → 0 (keyboard replaces nav bar)
+  const safeBottom = Math.max(insets.bottom, 34);
   const inputAnimatedStyle = useAnimatedStyle(() => ({
     paddingBottom: interpolate(
       progress.value,
       [0, 1],
-      [insets.bottom + spacing.sm, spacing.sm]
+      [safeBottom, spacing.sm]
     ),
   }));
 
@@ -523,7 +524,6 @@ export const ChatScreen: React.FC = () => {
 
         {/* Input */}
         <Animated.View
-          entering={SlideInUp.delay(300)}
           style={[styles.inputContainer, inputAnimatedStyle]}
         >
           {/* Image preview strip */}

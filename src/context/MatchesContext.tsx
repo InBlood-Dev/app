@@ -570,9 +570,21 @@ export const MatchesProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       return null;
     } catch (err) {
-      console.error('[MatchesContext] Swipe API error:', err);
+      const errorStr = err instanceof Error ? err.message : String(err);
+      const errorMessage = errorStr.toLowerCase();
+      const isAlreadyLiked = errorMessage.includes('already');
+      const isValidationError = errorMessage.includes('validation');
+      const isDuplicate = errorMessage.includes('duplicate') || errorMessage.includes('conflict');
 
-      // Revert optimistic update on error
+      // Already liked, validation, or duplicate — silently skip, keep profile removed from deck
+      if (isAlreadyLiked || isValidationError || isDuplicate) {
+        console.log('[MatchesContext] Skipping profile (already liked/validation/duplicate):', profileId, errorStr);
+        return null;
+      }
+
+      console.error('[MatchesContext] Swipe API error:', errorStr);
+
+      // Revert optimistic update for real errors
       if (direction === 'left') {
         setPassedProfiles(prev => prev.filter(id => id !== profileId));
       } else if (direction === 'right') {
@@ -582,9 +594,7 @@ export const MatchesProvider: React.FC<{ children: ReactNode }> = ({ children })
         setLikedProfiles(prev => prev.filter(id => id !== profileId));
       }
 
-      // Show specific error based on status code
       if (err instanceof Error) {
-        const errorMessage = err.message.toLowerCase();
         if (errorMessage.includes('daily swipe limit') || errorMessage.includes('swipe limit')) {
           setSwipesRemaining(0);
           setError('SWIPE_LIMIT_REACHED');
@@ -592,8 +602,6 @@ export const MatchesProvider: React.FC<{ children: ReactNode }> = ({ children })
           setError('Daily super like limit reached! Upgrade to Premium for more.');
         } else if (errorMessage.includes('yourself')) {
           setError('Cannot like yourself');
-        } else if (errorMessage.includes('already')) {
-          setError('You already liked this person');
         } else if (errorMessage.includes('not found')) {
           setError('User not found');
         } else {
