@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { User, ApiUserProfile, ApiPhoto, ApiTag, ApiPrompt } from '../types';
+import { trackEvent } from '../lib/analytics';
 import {
   getUserProfile,
   updateUserProfile as updateUserProfileApi,
@@ -408,6 +409,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Backend returns single photo object: { photo_id, url, is_primary, order_index }
         if (response.success && response.data?.url) {
           console.log('[UserContext] Photo uploaded, re-fetching profile');
+          trackEvent('photo_uploaded', { is_primary: isPrimary });
 
           // Re-fetch profile to get complete updated photos array from backend
           await fetchProfile(true);

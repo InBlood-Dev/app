@@ -40,6 +40,7 @@ import { useUser, useMatches, useAuth } from '../../context';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { startPayment, getPlans, getSubscriptionStatus, cancelSubscription } from '../../services/payment.service';
+import { trackEvent } from '../../lib/analytics';
 import { SafetyModal } from '../../components/modals/SafetyModal';
 import { DefaultAvatar } from '../../components';
 import type { PlanType, SubscriptionPlan, SubscriptionStatusResponse } from '../../types';
@@ -195,11 +196,13 @@ const PlanDetailsModal: React.FC<{
                 if (!selectedPlan) return;
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 setIsProcessing(true);
+                trackEvent('premium_checkout_started', { plan: selectedPlan, source: 'profile' });
                 startPayment(
                   selectedPlan as PlanType,
                   () => {
                     setIsProcessing(false);
                     onClose();
+                    trackEvent('premium_purchase_success', { plan: selectedPlan, source: 'profile' });
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     Alert.alert('Welcome to Premium!', 'Your subscription is now active.');
                     onPaymentSuccess();

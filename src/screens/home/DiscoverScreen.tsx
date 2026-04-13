@@ -43,6 +43,7 @@ import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme
 import { DualThumbSlider } from '../../components/DualThumbSlider';
 import { trackProfileView } from '../../services/interactions.service';
 import { startPayment, getPlans } from '../../services/payment.service';
+import { trackEvent } from '../../lib/analytics';
 import type { SubscriptionPlan } from '../../types';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -648,11 +649,13 @@ export const DiscoverScreen: React.FC = () => {
   const handlePurchase = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsPaymentProcessing(true);
+    trackEvent('premium_checkout_started', { plan: 'monthly', source: 'discover' });
     startPayment(
       'monthly',
       () => {
         setIsPaymentProcessing(false);
         setShowPremiumPopup(false);
+        trackEvent('premium_purchase_success', { plan: 'monthly', source: 'discover' });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Welcome to Premium!', 'Your subscription is now active. Enjoy unlimited likes!');
         refreshPremiumStatus();

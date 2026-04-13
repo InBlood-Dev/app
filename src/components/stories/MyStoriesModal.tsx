@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useStories, useAuth, useUser } from '../../context';
 import { Story } from '../../types';
+import { trackEvent } from '../../lib/analytics';
 import { useImagePicker } from '../../hooks/useImagePicker';
 import { get } from '../../services/api';
 import { ENDPOINTS } from '../../config/api.config';
@@ -190,6 +191,7 @@ export const MyStoriesModal: React.FC<MyStoriesModalProps> = ({
     const success = await addStory(selectedImage.uri, caption);
 
     if (success) {
+      trackEvent('story_created');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setShowPreview(false);
       setSelectedImage(null);

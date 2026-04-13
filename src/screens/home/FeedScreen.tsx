@@ -81,6 +81,7 @@ import { useDebounce } from "../../hooks/useDebounce";
 import { isUserOnline } from "../../utils/timeUtils";
 import { NotificationPermissionModal } from "../../components/modals/NotificationPermissionModal";
 import { notificationService } from "../../services/notifications.service";
+import { trackEvent } from "../../lib/analytics";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const DATE_CARD_WIDTH = (SCREEN_WIDTH - spacing.lg * 2 - spacing.md) / 2.3;
@@ -646,6 +647,7 @@ export const FeedScreen: React.FC = () => {
       const storyData = (selectedStory as any).storyUserData;
       if (storyData?.stories?.[selectedStoryIndex + 1]) {
         viewStory(storyData.stories[selectedStoryIndex + 1].story_id);
+        trackEvent('story_viewed', { story_id: storyData.stories[selectedStoryIndex + 1].story_id });
       }
     } else if (currentStoryIndex < storiesList.length - 1) {
       // Navigate to next user's story
@@ -660,6 +662,7 @@ export const FeedScreen: React.FC = () => {
       const nextStoryData = (storiesList[nextIndex] as any).storyUserData;
       if (nextStoryData?.stories?.[0]) {
         viewStory(nextStoryData.stories[0].story_id);
+        trackEvent('story_viewed', { story_id: nextStoryData.stories[0].story_id });
       }
     } else {
       // Close viewer when at the last story
@@ -711,6 +714,7 @@ export const FeedScreen: React.FC = () => {
         const storyData = story.storyUserData;
         if (storyData?.stories?.[0]) {
           viewStory(storyData.stories[0].story_id);
+          trackEvent('story_viewed', { story_id: storyData.stories[0].story_id });
         }
       }
     },

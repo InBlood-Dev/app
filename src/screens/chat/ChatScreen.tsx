@@ -32,6 +32,7 @@ import { Message, Profile } from '../../types';
 import { colors, fontSize, fontWeight, spacing, borderRadius } from '../../theme';
 import { blockUser, unblockUser } from '../../services/blocking.service';
 import { uploadChatImage, MAX_IMAGE_SIZE } from '../../services/chat.service';
+import { trackEvent } from '../../lib/analytics';
 import { getOnlineStatus } from '../../utils/timeUtils';
 
 type RootStackParamList = {
@@ -180,6 +181,7 @@ export const ChatScreen: React.FC = () => {
         text: messageToSend,
         type: 'text',
       });
+      trackEvent('message_sent', { type: 'text', length: messageToSend.length });
     } catch (error) {
       console.error('[ChatScreen] Failed to send message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
@@ -226,6 +228,7 @@ export const ChatScreen: React.FC = () => {
         type: 'image',
         mediaUrl: imageUrl,
       });
+      trackEvent('message_sent', { type: 'image' });
 
       setPendingImage(null);
     } catch (error) {

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Match, MatchToastData, Profile, SwipeDirection, RecommendedUser, ApiMatch, PendingLikesResponse } from '../types';
 import { getDiscoveryFeed } from '../services/discovery.service';
+import { trackEvent } from '../lib/analytics';
 import {
   sendLike,
   sendSuperLike,
@@ -528,6 +529,7 @@ export const MatchesProvider: React.FC<{ children: ReactNode }> = ({ children })
     try {
       if (direction === 'left') {
         // Pass
+        trackEvent('discovery_pass');
         const passResponse = await passUser(profileId);
         if (passResponse.success) {
           updateLimitsFromResponse(passResponse.data);
@@ -542,10 +544,13 @@ export const MatchesProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (response.success) {
         updateLimitsFromResponse(response.data);
+        const isMatched = 'is_matched' in response.data && !!response.data.is_matched;
+        trackEvent(direction === 'up' ? 'discovery_super_like' : 'discovery_like', { matched: isMatched });
 
         // Check for match (works for both regular like and super like)
         if ('is_matched' in response.data && response.data.is_matched && response.data.match) {
           console.log('[MatchesContext] It\'s a match!');
+          trackEvent('match_created', { source: direction === 'up' ? 'super_like' : 'like' });
 
           // Get the full profile from recommended users
           const matchedUser = recommendedUsers.find(u => u.user_id === profileId);
