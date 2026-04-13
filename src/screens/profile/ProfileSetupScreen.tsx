@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { API_BASE_URL } from "../../config/api.config";
+import { trackEvent } from "../../lib/analytics";
 import Animated, {
   FadeIn,
   FadeInRight,
@@ -490,6 +491,7 @@ export const ProfileSetupScreen: React.FC = () => {
           name: user?.name,
           profilePicture: user?.profilePicture,
         });
+        trackEvent("profile_setup_completed");
         console.log("[ProfileSetupScreen] Profile setup complete");
       } catch (error) {
         console.error("[ProfileSetupScreen] Error saving profile:", error);

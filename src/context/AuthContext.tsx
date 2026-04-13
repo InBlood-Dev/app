@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { setAuthToken } from "../services/api";
+import { trackEvent, identifyUser, resetAnalytics } from "../lib/analytics";
 import { API_BASE_URL } from "../config/api.config";
 import {
   initializeFirebaseAuth,
@@ -385,6 +386,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
           // Don't block login if persistence fails
         }
 
+        // Track auth event
+        const isNewUser = userData?.is_new_user === true;
+        trackEvent(isNewUser ? "user_signup" : "user_login", { method: "google" });
+        if (userId) identifyUser(userId, { email: userData?.email });
+
         // Initialize Firebase authentication (non-blocking)
         console.log("[AuthContext] Initializing Firebase authentication...");
         try {
@@ -412,6 +418,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
   const logout = useCallback(async () => {
     console.log("[AuthContext] logout called");
+    trackEvent("user_logout");
+    resetAnalytics();
 
     // Sign out from Google to clear cached account
     try {
